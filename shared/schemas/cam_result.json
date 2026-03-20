@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "cam_result.json",
+  "title": "CAMResult",
+  "type": "object",
+  "required": ["case_id", "final_decision", "generated_at"],
+  "properties": {
+    "case_id": {
+      "type": "string",
+      "description": "Reference to the credit case."
+    },
+    "final_decision": {
+      "type": "string",
+      "enum": ["approve", "approve_with_conditions", "decline", "manual_review"],
+      "description": "Credit appraisal memo decision."
+    },
+    "recommended_limit": {
+      "type": "number",
+      "description": "Recommended credit limit (if applicable)."
+    },
+    "recommended_roi": {
+      "type": "number",
+      "description": "Recommended return or pricing."
+    },
+    "overall_score": {
+      "type": "number",
+      "description": "Overall credit score or rating."
+    },
+    "score_breakdown": {
+      "type": "object",
+      "additionalProperties": { "type": "number" },
+      "description": "Component-wise score breakdown (e.g. financial, operational)."
+    },
+    "key_reasons": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Key factors driving the decision."
+    },
+    "evidence_summary": {
+      "type": "string",
+      "description": "Summary of evidence supporting the recommendation."
+    },
+    "cam_doc_path": {
+      "type": "string",
+      "description": "Path to generated CAM document file."
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Timestamp when the CAM was generated."
+    }
+  }
+}

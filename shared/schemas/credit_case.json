@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "credit_case.json",
+  "title": "CreditCase",
+  "type": "object",
+  "required": ["case_id", "company_name", "status", "created_at"],
+  "properties": {
+    "case_id": {
+      "type": "string",
+      "description": "Unique identifier for the credit appraisal case."
+    },
+    "company_name": {
+      "type": "string",
+      "description": "Name of the borrower company."
+    },
+    "cin_optional": {
+      "type": "string",
+      "description": "Corporate Identification Number (optional)."
+    },
+    "sector": {
+      "type": "string",
+      "description": "Industry or business sector."
+    },
+    "promoter_names": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Names of promoters or key stakeholders."
+    },
+    "uploaded_files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "file_name": { "type": "string" },
+          "file_path": { "type": "string" },
+          "doc_type": { "type": "string" },
+          "uploaded_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "description": "List of uploaded document references."
+    },
+    "officer_notes": {
+      "type": "string",
+      "description": "Internal notes from the credit officer."
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Timestamp when the case was created."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["created", "processing", "ready", "failed"],
+      "description": "Current processing status of the case."
+    }
+  }
+}

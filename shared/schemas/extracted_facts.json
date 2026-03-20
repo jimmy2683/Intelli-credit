@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "extracted_facts.json",
+  "title": "ExtractedFacts",
+  "type": "object",
+  "properties": {
+    "revenue": {
+      "type": "number",
+      "description": "Total revenue (numeric or latest period value)."
+    },
+    "EBITDA": {
+      "type": "number",
+      "description": "Earnings before interest, taxes, depreciation, and amortization."
+    },
+    "PAT": {
+      "type": "number",
+      "description": "Profit after tax."
+    },
+    "total_debt": {
+      "type": "number",
+      "description": "Total debt obligations."
+    },
+    "current_ratio": {
+      "type": "number",
+      "description": "Current assets / current liabilities."
+    },
+    "dscr": {
+      "type": "number",
+      "description": "Debt service coverage ratio."
+    },
+    "working_capital": {
+      "type": "number",
+      "description": "Current assets minus current liabilities."
+    },
+    "contingent_liabilities": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Disclosed contingent liabilities."
+    },
+    "related_party_transactions": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Related party transaction details."
+    },
+    "auditor_remarks": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Key remarks from the auditor report."
+    },
+    "extracted_entities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "type": { "type": "string" },
+          "role": { "type": "string" },
+          "source_ref": { "type": "string" }
+        }
+      },
+      "description": "Entities extracted from documents (e.g. directors, subsidiaries)."
+    },
+    "document_sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "doc_id": { "type": "string" },
+          "file_name": { "type": "string" },
+          "section": { "type": "string" },
+          "page_ref": { "type": "string" }
+        }
+      },
+      "description": "References to source documents for the extracted data."
+    }
+  }
+}

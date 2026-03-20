@@ -1,0 +1,47 @@
+version: "3.9"
+
+services:
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    environment:
+      - NEXT_PUBLIC_BACKEND_URL=${NEXT_PUBLIC_BACKEND_URL:-http://localhost:8080}
+    depends_on:
+      - backend-go
+
+  backend-go:
+    build:
+      context: ./backend-go
+      dockerfile: Dockerfile
+    ports:
+      - "${BACKEND_PORT:-8080}:8080"
+    volumes:
+      - credit-data:/data
+    environment:
+      - DATA_ROOT=/data
+      - DB_PATH=/data/credit-intel.db
+      - AI_ENGINE_BASE_URL=${AI_ENGINE_BASE_URL:-http://ai-engine:8000}
+      - BACKEND_PORT=${BACKEND_PORT:-8080}
+      - BACKEND_HTTP_TIMEOUT_SEC=${BACKEND_HTTP_TIMEOUT_SEC:-30}
+      - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-*}
+    depends_on:
+      - ai-engine
+
+  ai-engine:
+    build:
+      context: ./ai-engine
+      dockerfile: Dockerfile
+    ports:
+      - "${AI_ENGINE_PORT:-8000}:8000"
+    volumes:
+      - credit-data:/data
+    environment:
+      - DATA_ROOT=/data
+      - SEARCH_PROVIDER=${SEARCH_PROVIDER:-mock}
+
+volumes:
+  credit-data:
+    driver: local

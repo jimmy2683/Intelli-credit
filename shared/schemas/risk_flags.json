@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "risk_flags.json",
+  "title": "RiskFlags",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": ["flag_id", "flag_type", "severity", "description"],
+    "properties": {
+      "flag_id": {
+        "type": "string",
+        "description": "Unique identifier for the risk flag."
+      },
+      "flag_type": {
+        "type": "string",
+        "description": "Category of risk (e.g. financial, operational, governance)."
+      },
+      "severity": {
+        "type": "string",
+        "enum": ["low", "medium", "high", "critical"],
+        "description": "Severity level of the flag."
+      },
+      "description": {
+        "type": "string",
+        "description": "Human-readable description of the risk."
+      },
+      "evidence_refs": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "References to supporting evidence or source snippets."
+      },
+      "confidence": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1,
+        "description": "Confidence score of the flag (0–1)."
+      },
+      "impact_on_score": {
+        "type": "string",
+        "description": "Explanation of how this flag affects the overall score."
+      }
+    }
+  }
+}
