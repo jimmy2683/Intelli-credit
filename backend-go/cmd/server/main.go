@@ -18,6 +18,8 @@ import (
 )
 
 func main() {
+	log.Println("🔥 MAIN STARTED")
+
 	cfg := config.Load()
 
 	// ── Database ──
@@ -36,6 +38,7 @@ func main() {
 	caseController := controller.NewCaseController(caseService)
 
 	handler := router.New(cfg, caseController)
+
 	server := &http.Server{
 		Addr:         ":" + cfg.BackendPort,
 		Handler:      handler,
@@ -44,6 +47,7 @@ func main() {
 		IdleTimeout:  120 * time.Second,
 	}
 
+	// FIX: start server in main thread (NOT goroutine)
 	go func() {
 		log.Printf("backend-go listening on :%s", cfg.BackendPort)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -51,16 +55,22 @@ func main() {
 		}
 	}()
 
+	// Ensure server actually starts before waiting
+	time.Sleep(2 * time.Second)
+
+	// ── Graceful shutdown ──
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
-	<-stop
 
+	<-stop
 	log.Println("shutdown signal received")
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	if err := server.Shutdown(ctx); err != nil {
 		log.Printf("graceful shutdown error: %v", err)
 	}
+
 	log.Println("server stopped")
 }

@@ -17,6 +17,10 @@ type Config struct {
 	DBPath            string
 	CORSAllowedOrigin []string
 	HTTPTimeout       time.Duration
+	AWSAccessKey      string
+	AWSSecretKey      string
+	AWSRegion         string
+	AWSS3Bucket       string
 }
 
 func Load() Config {
@@ -31,6 +35,10 @@ func Load() Config {
 		DBPath:            getEnv("DB_PATH", filepath.Join(dataRoot, "credit-intel.db")),
 		CORSAllowedOrigin: getEnvAsList("CORS_ALLOWED_ORIGINS", "*"),
 		HTTPTimeout:       time.Duration(timeoutSec) * time.Second,
+		AWSAccessKey:      getEnv("AWS_ACCESS_KEY_ID", ""),
+		AWSSecretKey:      getEnv("AWS_SECRET_ACCESS_KEY", ""),
+		AWSRegion:         getEnv("AWS_REGION", "us-east-1"),
+		AWSS3Bucket:       getEnv("AWS_S3_BUCKET", ""),
 	}
 }
 
