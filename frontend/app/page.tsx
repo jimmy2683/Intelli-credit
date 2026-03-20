@@ -3,6 +3,19 @@
 import React, { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { 
+  CheckCircle2, 
+  AlertTriangle, 
+  XCircle, 
+  Play, 
+  ArrowRight, 
+  X, 
+  Plus, 
+  Activity, 
+  Clock, 
+  Database,
+  Sparkles
+} from "lucide-react";
 import CreateCaseForm from "@/components/CreateCaseForm";
 import AnimateIn from "@/components/AnimateIn";
 import { createCase } from "@/lib/api";
@@ -14,20 +27,24 @@ function fmtInr(v: number | undefined | null): string {
   if (Math.abs(v) >= 1e5) return `₹${(v / 1e5).toFixed(2)} L`;
   return `₹${v.toLocaleString("en-IN")}`;
 }
+
 function dClass(d: string) {
   const l = d.toLowerCase().replace(/_/g, "");
   if (l.includes("approve")) return "approve";
   if (l.includes("review") || l.includes("manual")) return "review";
   return "decline";
 }
-function dIcon(d: string) {
-  if (d.toLowerCase().includes("approve")) return "✅";
-  if (d.toLowerCase().includes("review") || d.toLowerCase().includes("manual")) return "⚠️";
-  return "❌";
+
+function dIcon(d: string, size = 14) {
+  const l = d.toLowerCase();
+  if (l.includes("approve")) return <CheckCircle2 size={size} />;
+  if (l.includes("review") || l.includes("manual")) return <AlertTriangle size={size} />;
+  return <XCircle size={size} />;
 }
+
 function scoreColor(v: number) {
   if (v >= 70) return "var(--success)";
-  if (v >= 50) return "var(--warn)";
+  if (v >= 50) return "var(--warning)";
   return "var(--danger)";
 }
 
@@ -36,22 +53,24 @@ function ScoreArc({ score }: { score: number | undefined }) {
   const r = 34, cx = 40, cy = 40, circ = 2 * Math.PI * r;
   const color = scoreColor(s);
   return (
-    <svg width="80" height="80" viewBox="0 0 80 80" style={{ flexShrink: 0 }}>
-      <circle cx={cx} cy={cy} r={r} fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="6"/>
-      <circle cx={cx} cy={cy} r={r} fill="none" stroke={color} strokeWidth="6"
-        strokeDasharray={circ} strokeDashoffset={circ * (1 - Math.min(s / 100, 1))}
-        strokeLinecap="round" transform={`rotate(-90 ${cx} ${cy})`}
-        style={{ transition:"stroke-dashoffset 1s ease", filter:`drop-shadow(0 0 5px ${color}80)` }}
-      />
-      <text x={cx} y={cy-3} textAnchor="middle" dominantBaseline="central"
-        style={{ fontFamily:"var(--font-mono)", fontSize:17, fontWeight:700, fill:color }}>
-        {score != null ? s.toFixed(0) : "—"}
-      </text>
-      <text x={cx} y={cy+14} textAnchor="middle"
-        style={{ fontSize:8, fill:"var(--text-3)", fontWeight:600, letterSpacing:"0.05em" }}>
-        SCORE
-      </text>
-    </svg>
+    <div style={{ position: "relative", display: "inline-flex" }}>
+      <svg width="80" height="80" viewBox="0 0 80 80" style={{ flexShrink: 0 }}>
+        <circle cx={cx} cy={cy} r={r} fill="none" stroke="var(--line)" strokeWidth="6" />
+        <circle cx={cx} cy={cy} r={r} fill="none" stroke={color} strokeWidth="6"
+          strokeDasharray={circ} strokeDashoffset={circ * (1 - Math.min(s / 100, 1))}
+          strokeLinecap="round" transform={`rotate(-90 ${cx} ${cy})`}
+          style={{ transition: "stroke-dashoffset 1s cubic-bezier(0.4, 0, 0.2, 1) 0.2s", filter: `drop-shadow(0 0 6px ${color}60)` }}
+        />
+        <text x={cx} y={cy - 3} textAnchor="middle" dominantBaseline="central"
+          style={{ fontFamily: "var(--font-mono)", fontSize: 18, fontWeight: 700, fill: color }}>
+          {score != null ? s.toFixed(0) : "—"}
+        </text>
+        <text x={cx} y={cy + 16} textAnchor="middle"
+          style={{ fontSize: 9, fill: "var(--text-3)", fontWeight: 700, letterSpacing: "0.05em" }}>
+          SCORE
+        </text>
+      </svg>
+    </div>
   );
 }
 
@@ -74,94 +93,85 @@ export default function HomePage() {
   }
 
   return (
-    <div style={{ display:"flex", flexDirection:"column", gap:52 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 52 }}>
 
       {/* ═══ HERO ═══ */}
       <AnimateIn>
-        <section style={{
-          position:"relative",
-          background:"var(--glass-bg)",
-          border:"1px solid var(--glass-border)",
-          borderTopColor:"var(--glass-top)",
-          borderRadius:"var(--r-xl)",
-          padding:"68px 72px",
-          overflow:"hidden",
-          backdropFilter:"blur(24px) saturate(160%)",
-          WebkitBackdropFilter:"blur(24px) saturate(160%)",
-          boxShadow:"var(--shadow), inset 0 1px 0 var(--glass-shine)",
+        <section className="card" style={{
+          padding: "68px 72px",
+          display: "grid",
+          gridTemplateColumns: "1fr auto",
+          gap: "40px",
+          alignItems: "center",
         }}>
-          {/* ambient glow blobs */}
-          <div style={{ position:"absolute",top:-100,left:-100,width:500,height:500,borderRadius:"50%", background:"radial-gradient(circle,rgba(79,142,247,0.09) 0%,transparent 70%)", pointerEvents:"none" }}/>
-          <div style={{ position:"absolute",bottom:-80,right:-60,width:400,height:400,borderRadius:"50%", background:"radial-gradient(circle,rgba(155,127,238,0.08) 0%,transparent 70%)", pointerEvents:"none" }}/>
-
           {/* inner shimmer stripe */}
-          <div style={{ position:"absolute",top:"-30%",left:"40%",width:"80px",height:"160%", background:"linear-gradient(180deg,transparent 0%,var(--glass-shine) 40%,transparent 100%)", transform:"rotate(20deg)",pointerEvents:"none" }}/>
+          <div style={{ position: "absolute", top: "-30%", left: "40%", width: "80px", height: "160%", background: "linear-gradient(180deg, transparent 0%, var(--glass-hi) 40%, transparent 100%)", transform: "rotate(20deg)", pointerEvents: "none", opacity: 0.5 }} />
 
-          <div style={{ position:"relative", maxWidth:680 }}>
+          <div style={{ position: "relative", maxWidth: 680 }}>
             {/* pill */}
             <div style={{
-              display:"inline-flex",alignItems:"center",gap:8,marginBottom:26,
-              padding:"6px 14px",borderRadius:"var(--r-full)",
-              background:"var(--primary-2)",border:"1px solid var(--primary-3)",
-              backdropFilter:"blur(8px)",
+              display: "inline-flex", alignItems: "center", gap: 8, marginBottom: 26,
+              padding: "6px 14px", borderRadius: "var(--r-full)",
+              background: "var(--primary-soft)", border: "1px solid var(--primary-border)",
             }}>
-              <span style={{ width:7,height:7,borderRadius:"50%",background:"var(--primary)",display:"inline-block",animation:"blink 2s infinite" }}/>
-              <span style={{ fontSize:12,fontWeight:700,color:"var(--primary)",textTransform:"uppercase",letterSpacing:"0.08em" }}>
+              <Sparkles size={14} className="text-primary" />
+              <span style={{ fontSize: 12, fontWeight: 700, color: "var(--primary)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
                 AI-Powered Credit Intelligence
               </span>
             </div>
 
             <h1 style={{
-              fontFamily:"var(--font)", fontSize:"clamp(34px,4vw,54px)", fontWeight:800,
-              letterSpacing:"-0.04em", lineHeight:1.06, color:"var(--text)", marginBottom:22,
+              fontFamily: "var(--font)", fontSize: "clamp(34px, 4vw, 54px)", fontWeight: 800,
+              letterSpacing: "-0.04em", lineHeight: 1.06, color: "var(--text)", marginBottom: 22,
             }}>
-              Corporate Credit<br/>
-              <span style={{
-                background:"linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%)",
-                WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent", backgroundClip:"text",
-              }}>Appraisal Workbench</span>
+              Corporate Credit<br />
+              <span style={{ color: "var(--primary)" }}>Appraisal Workbench</span>
             </h1>
 
-            <p style={{ fontSize:17, color:"var(--text-2)", lineHeight:1.72, marginBottom:38, maxWidth:560 }}>
+            <p style={{ fontSize: 17, color: "var(--text-2)", lineHeight: 1.72, marginBottom: 38, maxWidth: 560 }}>
               Upload borrower documents, run AI‑assisted analysis, and generate Credit Appraisal Memos
               with full evidence traceability — in minutes, not days.
             </p>
 
-            <div style={{ display:"flex", gap:14, flexWrap:"wrap" }}>
-              <Link href="/cases/demo_healthy_001" style={{ textDecoration:"none" }}>
-                <button className="btn btn-primary btn-lg" style={{ boxShadow:"0 6px 28px var(--primary-3)" }}>
-                  ▶ Try Healthy Borrower Demo
+            <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
+              <Link href="/cases/demo_healthy_001" style={{ textDecoration: "none" }}>
+                <button className="btn btn-primary btn-lg" style={{ boxShadow: "0 6px 24px var(--primary-soft)" }}>
+                  <Play size={16} fill="currentColor" /> Try Healthy Borrower Demo
                 </button>
               </Link>
-              <Link href="/cases/demo_risky_002" style={{ textDecoration:"none" }}>
+              <Link href="/cases/demo_risky_002" style={{ textDecoration: "none" }}>
                 <button className="btn btn-lg" style={{
-                  background:"linear-gradient(135deg,#7f1d1d,#b91c1c)",
-                  color:"#fff",border:"none",
-                  boxShadow:"0 6px 28px rgba(185,28,28,0.35), inset 0 1px 0 rgba(255,255,255,0.1)",
-                }}>⚠ Try Risky Borrower Demo</button>
+                  background: "var(--danger-soft)", color: "var(--danger)", border: "1px solid var(--danger-border)",
+                  boxShadow: "0 6px 24px var(--danger-soft)",
+                }}>
+                  <AlertTriangle size={16} /> Try Risky Borrower Demo
+                </button>
               </Link>
             </div>
           </div>
 
           {/* floating stats */}
-          <div style={{ position:"absolute", right:72, top:"50%", transform:"translateY(-50%)", display:"flex", flexDirection:"column", gap:16 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             {[
-              { val:"94.2%", lbl:"Accuracy" },
-              { val:"< 3min", lbl:"Avg. Time" },
-              { val:"1,200+", lbl:"Cases" },
-            ].map((s,i) => (
-              <div key={s.lbl} className="float-anim" style={{
-                background:"var(--glass-bg-2)", border:"1px solid var(--glass-border)",
-                borderTopColor:"var(--glass-top)",
-                backdropFilter:"blur(20px)",
-                WebkitBackdropFilter:"blur(20px)",
-                borderRadius:"var(--r-lg)",
-                padding:"16px 24px", textAlign:"center", minWidth:130,
-                boxShadow:"var(--shadow-sm), inset 0 1px 0 var(--glass-shine)",
-                animationDelay:`${i * 0.5}s`,
+              { val: "94.2%", lbl: "Accuracy", icon: <Activity size={18} /> },
+              { val: "< 3min", lbl: "Avg. Time", icon: <Clock size={18} /> },
+              { val: "1,200+", lbl: "Cases", icon: <Database size={18} /> },
+            ].map((s, i) => (
+              <div key={s.lbl} style={{
+                background: "var(--glass-light)", border: "1px solid var(--line)",
+                backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)",
+                borderRadius: "var(--r-lg)", padding: "16px 24px", minWidth: 160,
+                boxShadow: "var(--sh-sm), inset 0 1px 0 var(--glass-hi)",
+                display: "flex", alignItems: "center", gap: 16,
+                animationDelay: `${i * 0.15}s`,
+                animation: "fadeUp 0.6s var(--ease) forwards",
+                opacity: 0,
               }}>
-                <div style={{ fontFamily:"var(--font-mono)", fontSize:22, fontWeight:700, color:"var(--text)", letterSpacing:"-0.03em" }}>{s.val}</div>
-                <div style={{ fontSize:11, fontWeight:700, color:"var(--text-3)", textTransform:"uppercase", letterSpacing:"0.09em", marginTop:3 }}>{s.lbl}</div>
+                <div style={{ color: "var(--primary)", opacity: 0.8 }}>{s.icon}</div>
+                <div>
+                  <div style={{ fontFamily: "var(--font-mono)", fontSize: 22, fontWeight: 700, color: "var(--text)", letterSpacing: "-0.03em", lineHeight: 1.1 }}>{s.val}</div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: "0.09em", marginTop: 4 }}>{s.lbl}</div>
+                </div>
               </div>
             ))}
           </div>
@@ -170,72 +180,73 @@ export default function HomePage() {
 
       {/* ═══ CASES ═══ */}
       <section>
-        <AnimateIn>
-          <div style={{ display:"flex", alignItems:"baseline", justifyContent:"space-between", marginBottom:28 }}>
+        <AnimateIn stagger={1}>
+          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 28 }}>
             <div>
-              <h2 style={{ fontSize:26, fontWeight:800, letterSpacing:"-0.03em", color:"var(--text)", marginBottom:5 }}>
+              <h2 style={{ fontSize: 26, fontWeight: 800, letterSpacing: "-0.03em", color: "var(--text)", marginBottom: 5 }}>
                 Preloaded Cases
               </h2>
-              <p style={{ fontSize:14, color:"var(--text-3)" }}>Click any case to open the full analysis dashboard</p>
+              <p style={{ fontSize: 14, color: "var(--text-3)" }}>Click any case to open the full analysis dashboard</p>
             </div>
             <span style={{
-              padding:"5px 14px", background:"var(--primary-2)", color:"var(--primary)",
-              border:"1px solid var(--primary-3)", borderRadius:"var(--r-full)",
-              fontSize:13, fontWeight:700, backdropFilter:"blur(8px)",
+              padding: "5px 14px", background: "var(--primary-soft)", color: "var(--primary)",
+              border: "1px solid var(--primary-border)", borderRadius: "var(--r-full)",
+              fontSize: 13, fontWeight: 700, backdropFilter: "blur(8px)",
             }}>{SAMPLE_CASES.length} cases</span>
           </div>
         </AnimateIn>
 
-        <AnimateIn>
-          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(420px,1fr))", gap:20 }}>
+        <AnimateIn stagger={2}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(420px, 1fr))", gap: 24 }}>
             {SAMPLE_CASES.map((c) => {
-              const score  = c.score_result?.overall_score ?? c.cam_result?.overall_score;
-              const dec    = c.score_result?.decision ?? c.cam_result?.final_decision ?? "pending";
-              const flags  = c.risk_flags?.length ?? 0;
-              const crit   = c.risk_flags?.filter(f => f.severity==="critical"||f.severity==="high").length ?? 0;
-              const dc     = dClass(dec);
-              const accent = score != null && score >= 70 ? "var(--success)" : score != null && score >= 50 ? "var(--warn)" : "var(--danger)";
+              const score = c.score_result?.overall_score ?? c.cam_result?.overall_score;
+              const dec = c.score_result?.decision ?? c.cam_result?.final_decision ?? "pending";
+              const flags = c.risk_flags?.length ?? 0;
+              const crit = c.risk_flags?.filter(f => f.severity === "critical" || f.severity === "high").length ?? 0;
+              const dc = dClass(dec);
+              const accent = score != null && score >= 70 ? "var(--success)" : score != null && score >= 50 ? "var(--warning)" : "var(--danger)";
 
               return (
-                <Link key={c.case_id} href={`/cases/${c.case_id}`} style={{ textDecoration:"none" }}>
+                <Link key={c.case_id} href={`/cases/${c.case_id}`} style={{ textDecoration: "none", color: "inherit" }}>
                   <div
-                    className="card card-interactive"
-                    style={{ padding:"24px 28px", borderTop:`3px solid ${accent}` }}
+                    className="card"
+                    style={{ padding: "28px", borderTop: `3px solid ${accent}`, cursor: "pointer", display: "flex", flexDirection: "column", height: "100%" }}
                   >
-                    {/* card inner shine */}
-                    <div style={{ display:"flex", alignItems:"flex-start", gap:16, marginBottom:20 }}>
-                      <ScoreArc score={score}/>
-                      <div style={{ flex:1, minWidth:0 }}>
-                        <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:6, flexWrap:"wrap" }}>
-                          <span style={{ fontSize:17, fontWeight:700, color:"var(--text)", letterSpacing:"-0.01em" }}>{c.company_name}</span>
-                          <span className={`badge ${dc}`}>{dIcon(dec)} {dec.replace(/_/g," ").toUpperCase()}</span>
+                    <div style={{ display: "flex", alignItems: "flex-start", gap: 20, marginBottom: 24 }}>
+                      <ScoreArc score={score} />
+                      <div style={{ flex: 1, minWidth: 0, marginTop: 4 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
+                          <span style={{ fontSize: 18, fontWeight: 700, color: "var(--text)", letterSpacing: "-0.01em" }}>{c.company_name}</span>
+                          <span className={`badge ${dc}`}>
+                            {dIcon(dec, 12)} {dec.replace(/_/g, " ").toUpperCase()}
+                          </span>
                         </div>
-                        <p style={{ fontSize:13, color:"var(--text-3)", margin:0 }}>
+                        <p style={{ fontSize: 13, color: "var(--text-2)", margin: 0, lineHeight: 1.5 }}>
                           {c.sector}{(c.promoter_names ?? []).length > 0 && <> &nbsp;·&nbsp; {c.promoter_names!.join(", ")}</>}
                         </p>
                       </div>
                     </div>
 
                     <div style={{
-                      display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:0,
-                      background:"var(--glass-bg-2)", borderRadius:"var(--r-md)",
-                      border:"1px solid var(--glass-border)", overflow:"hidden",
-                      backdropFilter:"blur(10px)",
+                      display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 0,
+                      background: "var(--glass-light)", borderRadius: "var(--r-md)",
+                      border: "1px solid var(--line)", overflow: "hidden",
+                      backdropFilter: "blur(10px)", marginTop: "auto"
                     }}>
                       {[
-                        { l:"Credit Limit", v:fmtInr(c.cam_result?.recommended_limit) },
-                        { l:"Risk Flags",   v:String(flags) + (crit>0 ? ` (${crit}⚠)` : "") },
-                        { l:"ROI",          v:c.cam_result?.recommended_roi ? `${c.cam_result.recommended_roi}%` : "—" },
-                      ].map((s,si) => (
-                        <div key={s.l} style={{ padding:"12px 16px", borderRight:si<2?"1px solid var(--glass-border)":"none" }}>
-                          <div style={{ fontSize:10, fontWeight:700, color:"var(--text-3)", textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:4 }}>{s.l}</div>
-                          <div style={{ fontFamily:"var(--font-mono)", fontSize:14, fontWeight:600, color:s.l==="Risk Flags"&&crit>0?"var(--danger)":"var(--text)" }}>{s.v}</div>
+                        { l: "Credit Limit", v: fmtInr(c.cam_result?.recommended_limit) },
+                        { l: "Risk Flags", v: String(flags) + (crit > 0 ? ` (${crit}⚠)` : "") },
+                        { l: "ROI", v: c.cam_result?.recommended_roi ? `${c.cam_result.recommended_roi}%` : "—" },
+                      ].map((s, si) => (
+                        <div key={s.l} style={{ padding: "14px 16px", borderRight: si < 2 ? "1px solid var(--line)" : "none" }}>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>{s.l}</div>
+                          <div style={{ fontFamily: "var(--font-mono)", fontSize: 15, fontWeight: 600, color: s.l === "Risk Flags" && crit > 0 ? "var(--danger)" : "var(--text)" }}>{s.v}</div>
                         </div>
                       ))}
                     </div>
 
-                    <div style={{ marginTop:14, textAlign:"right", fontSize:12, fontWeight:700, color:"var(--primary)" }}>
-                      Open Analysis →
+                    <div style={{ marginTop: 20, textAlign: "right", fontSize: 13, fontWeight: 700, color: "var(--primary)", display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 6 }}>
+                      Open Analysis <ArrowRight size={14} />
                     </div>
                   </div>
                 </Link>
@@ -247,47 +258,51 @@ export default function HomePage() {
 
       {/* ═══ ERROR / SUCCESS ═══ */}
       {error && (
-        <div className="toast-error">
-          <span style={{ fontSize:18 }}>⚠️</span>
-          <span style={{ flex:1 }}>{error}</span>
-          <button className="toast-dismiss" onClick={()=>setError(null)}>✕</button>
+        <div className="toast-error" style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <AlertTriangle size={20} />
+          <span style={{ flex: 1 }}>{error}</span>
+          <button className="toast-dismiss" onClick={() => setError(null)} style={{ display: "flex", background: "transparent", border: "none" }}><X size={18} /></button>
         </div>
       )}
-      {success && <div className="msg-success">{success}</div>}
+      {success && (
+        <div className="msg-success" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <CheckCircle2 size={16} /> {success}
+        </div>
+      )}
 
       {/* ═══ CREATE CASE ═══ */}
-      <AnimateIn>
+      <AnimateIn stagger={3}>
         <section className="card card-pad">
-          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:showCreate?28:0 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: showCreate ? 28 : 0 }}>
             <div>
-              <h2 style={{ fontSize:22, fontWeight:800, letterSpacing:"-0.025em", color:"var(--text)", marginBottom:4 }}>
+              <h2 style={{ fontSize: 22, fontWeight: 800, letterSpacing: "-0.025em", color: "var(--text)", marginBottom: 4 }}>
                 Create New Case
               </h2>
-              <p style={{ fontSize:14, color:"var(--text-3)" }}>Start a fresh credit appraisal pipeline</p>
+              <p style={{ fontSize: 14, color: "var(--text-3)" }}>Start a fresh credit appraisal pipeline</p>
             </div>
             <button
               className="btn"
               style={{
-                background:showCreate?"var(--glass-bg-2)":"var(--primary-2)",
-                color:showCreate?"var(--text-3)":"var(--primary)",
-                borderColor:showCreate?"var(--glass-border)":"var(--primary-3)",
-                backdropFilter:"blur(12px)",
-                fontSize:14, fontWeight:700,
-                transition:"all 0.25s var(--ease-spring)",
+                background: showCreate ? "var(--glass-light)" : "var(--primary-soft)",
+                color: showCreate ? "var(--text-2)" : "var(--primary)",
+                border: `1px solid ${showCreate ? "var(--line)" : "var(--primary-border)"}`,
+                backdropFilter: "blur(12px)",
+                fontSize: 14, fontWeight: 700,
+                transition: "all 0.25s var(--ease)",
               }}
               onClick={() => setShowCreate(!showCreate)}
             >
-              {showCreate ? "✕ Cancel" : "+ New Case"}
+              {showCreate ? <><X size={16} /> Cancel</> : <><Plus size={16} /> New Case</>}
             </button>
           </div>
 
           <div style={{
             maxHeight: showCreate ? "800px" : "0px",
-            overflow:"hidden",
-            transition:"max-height 0.45s var(--ease-smooth), opacity 0.35s",
+            overflow: "hidden",
+            transition: "max-height 0.45s var(--ease), opacity 0.35s var(--ease)",
             opacity: showCreate ? 1 : 0,
           }}>
-            <div style={{ height:1, background:"var(--line)", marginBottom:28 }}/>
+            <div style={{ height: 1, background: "var(--line)", marginBottom: 28 }} />
             <CreateCaseForm onCreate={handleCreate} loading={loading} error={error} success={success} />
           </div>
         </section>

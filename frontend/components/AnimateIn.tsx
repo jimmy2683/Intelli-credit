@@ -3,18 +3,20 @@
  * AnimateIn — lightweight scroll-reveal wrapper.
  * Wraps children and adds .reveal class + IntersectionObserver.
  * Usage: <AnimateIn delay={0.1}><YourCard /></AnimateIn>
+ * <AnimateIn stagger={1}><YourCard /></AnimateIn>
  */
-import { useEffect, useRef } from "react";
+import React, { useEffect, useRef } from "react";
 
 type Props = {
   children: React.ReactNode;
-  delay?: number;   /* seconds */
+  delay?: number;   /* specific delay in seconds */
+  stagger?: number; /* index for calculating cascaded delays */
   className?: string;
   style?: React.CSSProperties;
-  as?: keyof JSX.IntrinsicElements;
+  as?: React.ElementType; 
 };
 
-export default function AnimateIn({ children, delay = 0, className = "", style, as: Tag = "div" }: Props) {
+export default function AnimateIn({ children, delay, stagger, className = "", style, as: Tag = "div" }: Props) {
   const ref = useRef<HTMLElement>(null);
 
   useEffect(() => {
@@ -28,12 +30,21 @@ export default function AnimateIn({ children, delay = 0, className = "", style, 
     return () => obs.disconnect();
   }, []);
 
+  // Use explicit delay if provided, otherwise calculate based on stagger index
+  const calculatedDelay = delay !== undefined ? `${delay}s` : stagger !== undefined ? `${stagger * 0.1}s` : undefined;
+
+  const combinedStyle: React.CSSProperties = {
+    ...style,
+    transitionDelay: calculatedDelay,
+    // Also inject --stagger as a CSS var just in case child elements want to use it
+    ...(stagger !== undefined ? { "--stagger": stagger } as React.CSSProperties : {}),
+  };
+
   return (
-    // @ts-expect-error dynamic tag
     <Tag
       ref={ref}
       className={`reveal${className ? " " + className : ""}`}
-      style={{ transitionDelay: delay ? `${delay}s` : undefined, ...style }}
+      style={combinedStyle}
     >
       {children}
     </Tag>

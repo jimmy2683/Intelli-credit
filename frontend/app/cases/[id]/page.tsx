@@ -3,6 +3,23 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { 
+  CheckCircle2, 
+  AlertTriangle, 
+  XCircle, 
+  BarChart3, 
+  FileText, 
+  Hash, 
+  ShieldAlert,
+  ChevronRight,
+  ArrowLeft,
+  ArrowRight,
+  Download,
+  File,
+  Loader2,
+  X
+} from "lucide-react";
+
 import EvidenceDrawer, { type EvidenceItem } from "@/components/EvidenceDrawer";
 import FileUpload from "@/components/FileUpload";
 import OfficerNotes from "@/components/OfficerNotes";
@@ -33,7 +50,7 @@ function factMeta(f: unknown) {
 }
 function scoreColor(v: number) {
   if (v >= 70) return "var(--success)";
-  if (v >= 50) return "var(--warn)";
+  if (v >= 50) return "var(--warning)";
   return "var(--danger)";
 }
 function dClass(d: string) {
@@ -44,9 +61,9 @@ function dClass(d: string) {
 }
 function dIcon(d: string) {
   const l = d.toLowerCase();
-  if (l.includes("approve")) return "✅";
-  if (l.includes("review") || l.includes("manual")) return "⚠️";
-  return "❌";
+  if (l.includes("approve")) return <CheckCircle2 size={24} />;
+  if (l.includes("review") || l.includes("manual")) return <AlertTriangle size={24} />;
+  return <XCircle size={24} />;
 }
 function dLabel(d: string) {
   const l = d.toLowerCase();
@@ -60,6 +77,7 @@ function dLabel(d: string) {
 function ScoreGauge({ score }: { score: number | undefined }) {
   const [animated, setAnimated] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  
   useEffect(() => {
     const obs = new IntersectionObserver(([e]) => { if (e.isIntersecting) { setAnimated(true); obs.disconnect(); } }, { threshold: 0.3 });
     if (ref.current) obs.observe(ref.current);
@@ -72,13 +90,9 @@ function ScoreGauge({ score }: { score: number | undefined }) {
   const offset = animated ? circ * (1 - Math.min(s / 100, 1)) : circ;
 
   return (
-    <div ref={ref} style={{ textAlign: "center" }}>
+    <div ref={ref} style={{ textAlign: "center", position: "relative", display: "inline-block" }}>
       <svg width="140" height="140" viewBox="0 0 140 140">
-        <circle cx="70" cy="70" r={r} fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="9"/>
-        {/* Background ring shimmer */}
-        <circle cx="70" cy="70" r={r} fill="none" stroke="rgba(255,255,255,0.02)" strokeWidth="9"
-          strokeDasharray="4 10" strokeLinecap="round"/>
-        {/* Colored progress */}
+        <circle cx="70" cy="70" r={r} fill="none" stroke="var(--line-subtle)" strokeWidth="9"/>
         <circle cx="70" cy="70" r={r} fill="none" stroke={color} strokeWidth="9"
           strokeDasharray={circ} strokeDashoffset={offset}
           strokeLinecap="round" transform="rotate(-90 70 70)"
@@ -100,7 +114,7 @@ function ScoreGauge({ score }: { score: number | undefined }) {
 /* ─── Sidebar KPI row ─── */
 function SideKpi({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
-    <div style={{ padding: "15px 20px", borderBottom: "1px solid var(--glass-border)" }}>
+    <div style={{ padding: "15px 20px", borderBottom: "1px solid var(--line)" }}>
       <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.09em", color: "var(--text-3)", marginBottom: 5 }}>{label}</div>
       <div style={{ fontFamily: "var(--font-mono)", fontSize: 22, fontWeight: 600, letterSpacing: "-0.03em", color: color ?? "var(--text)", lineHeight: 1 }}>{value}</div>
     </div>
@@ -127,9 +141,12 @@ function Section({ title, sub, action, children, stagger = 0 }: {
   );
 }
 
-function Empty({ icon, text }: { icon: string; text: string }) {
+function Empty({ icon, text }: { icon: React.ReactNode; text: string }) {
   return (
-    <div className="empty-state"><div className="empty-icon">{icon}</div><p className="empty-text">{text}</p></div>
+    <div className="empty-state" style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, padding: "40px 20px" }}>
+      <div className="empty-icon" style={{ color: "var(--text-3)", opacity: 0.5 }}>{icon}</div>
+      <p className="empty-text" style={{ fontSize: 14, color: "var(--text-3)", margin: 0 }}>{text}</p>
+    </div>
   );
 }
 
@@ -214,6 +231,7 @@ export default function CasePage() {
     setDrawerTitle(flag.flag_type?.replace(/_/g," ").replace(/\b\w/g,c=>c.toUpperCase()) ?? "Risk Flag");
     setDrawerSev(flag.severity); setDrawerOpen(true);
   }
+  
   function openFactEvidence(key: string) {
     const meta = factMeta(facts[key]); const val = factValue(facts[key]);
     setDrawerItems(meta.source_ref ? [{
@@ -228,15 +246,18 @@ export default function CasePage() {
 
   /* Loading */
   if (!caseId || loading) return (
-    <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:16, padding:"120px 24px" }}>
-      <span className="spinner spinner-lg spinner-dark" />
-      <span style={{ fontSize:15, color:"var(--text-3)" }}>Loading case details…</span>
+    <div style={{ display:"flex", flexDirection:"column", alignItems:"center", justifyContent: "center", minHeight: "60vh", gap:16, padding:"120px 24px" }}>
+      <Loader2 className="animate-spin text-primary" size={32} color="var(--primary)" />
+      <span style={{ fontSize:15, color:"var(--text-3)", fontWeight: 500 }}>Loading case details…</span>
     </div>
   );
+  
   if (!cc) return (
     <div style={{ textAlign:"center", padding:"80px 24px" }}>
       <p style={{ color:"var(--text-3)", marginBottom:20, fontSize:15 }}>Case not found.</p>
-      <Link href="/" className="btn btn-secondary">← Back to Dashboard</Link>
+      <Link href="/" className="btn btn-secondary" style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+        <ArrowLeft size={16} /> Back to Dashboard
+      </Link>
     </div>
   );
 
@@ -250,13 +271,15 @@ export default function CasePage() {
 
       {/* Breadcrumb */}
       <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:28, fontSize:14, color:"var(--text-3)", animation:"fadeUp 0.3s ease both" }}>
-        <Link href="/" style={{ color:"var(--text-3)", textDecoration:"none", transition:"color 0.15s" }}
+        <Link href="/" style={{ display: "flex", alignItems: "center", gap: 6, color:"var(--text-3)", textDecoration:"none", transition:"color 0.15s" }}
           onMouseEnter={e=>(e.currentTarget.style.color="var(--primary)")}
           onMouseLeave={e=>(e.currentTarget.style.color="var(--text-3)")}
-        >Dashboard</Link>
-        <span>›</span>
+        >
+          <ArrowLeft size={14} /> Dashboard
+        </Link>
+        <ChevronRight size={14} />
         <span style={{ color:"var(--text-2)", fontWeight:500 }}>{cc.company_name}</span>
-        {cc.sector && <><span>›</span><span>{cc.sector}</span></>}
+        {cc.sector && <><ChevronRight size={14} /><span>{cc.sector}</span></>}
       </div>
 
       {/* Analysis progress */}
@@ -265,7 +288,9 @@ export default function CasePage() {
           <div className="step-progress">
             {STEPS.map((s,i) => (
               <div key={s} className={`step-item ${i+1<analysisStep?"done":i+1===analysisStep?"active":""}`}>
-                <div className="step-dot">{i+1<analysisStep?"✓":i+1}</div>
+                <div className="step-dot" style={{ display: "flex", alignItems: "center", justifyItems: "center"}}>
+                  {i+1<analysisStep ? <CheckCircle2 size={14} /> : i+1}
+                </div>
                 <span className="step-label">{s}</span>
               </div>
             ))}
@@ -275,28 +300,32 @@ export default function CasePage() {
 
       {/* Error toast */}
       {error && (
-        <div className="toast-error" style={{ marginBottom:24 }}>
-          <span style={{ fontSize:18 }}>⚠️</span>
-          <span style={{ flex:1 }}>{error}</span>
-          <button className="toast-dismiss" onClick={() => setError(null)}>✕</button>
+        <div className="toast-error" style={{ display: "flex", alignItems: "center", gap: 12, marginBottom:24, padding: "16px", borderRadius: "var(--r-md)", backgroundColor: "var(--danger-soft)", border: "1px solid var(--danger-border)", color: "var(--danger)" }}>
+          <AlertTriangle size={20} />
+          <span style={{ flex:1, fontSize: 14 }}>{error}</span>
+          <button className="toast-dismiss" onClick={() => setError(null)} style={{ background: "transparent", border: "none", color: "inherit", cursor: "pointer", display: "flex" }}>
+            <X size={18} />
+          </button>
         </div>
       )}
 
       {/* Decision banner */}
       {score != null && decision !== "pending" && (
-        <div className={`decision-banner ${dc}`} style={{ marginBottom:32 }}>
-          <span className="db-icon">{dIcon(decision)}</span>
+        <div className={`decision-banner ${dc}`} style={{ marginBottom:32, display: "flex", alignItems: "center", gap: 20 }}>
+          <span className="db-icon" style={{ display: "flex" }}>{dIcon(decision)}</span>
           <div style={{ flex:1 }}>
-            <div className="db-title">{dLabel(decision)}</div>
-            <div className="db-sub">
-              {scoreResult?.hard_override_applied
-                ? `⚠ Hard Override: ${scoreResult.hard_override_reason ?? "Critical flags triggered"}`
-                : scoreResult?.decision_explanation ?? cam?.evidence_summary ?? ""}
+            <div className="db-title" style={{ fontSize: 22, fontWeight: 700, marginBottom: 4 }}>{dLabel(decision)}</div>
+            <div className="db-sub" style={{ fontSize: 14, opacity: 0.8 }}>
+              {scoreResult?.hard_override_applied ? (
+                <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <AlertTriangle size={14} /> Hard Override: {scoreResult.hard_override_reason ?? "Critical flags triggered"}
+                </span>
+              ) : scoreResult?.decision_explanation ?? cam?.evidence_summary ?? ""}
             </div>
           </div>
           <div style={{ textAlign:"right" }}>
-            <div className="db-score">{score.toFixed(1)}</div>
-            <div className="db-score-sub">{[limit&&`Limit: ${fmtInr(limit)}`, roi&&`ROI: ${roi}%`].filter(Boolean).join("  ·  ")}</div>
+            <div className="db-score" style={{ fontSize: 36, fontWeight: 800, fontFamily: "var(--font-mono)" }}>{score.toFixed(1)}</div>
+            <div className="db-score-sub" style={{ fontSize: 12, opacity: 0.8, marginTop: 4 }}>{[limit&&`Limit: ${fmtInr(limit)}`, roi&&`ROI: ${roi}%`].filter(Boolean).join("  ·  ")}</div>
           </div>
         </div>
       )}
@@ -309,27 +338,30 @@ export default function CasePage() {
           {/* Identity card */}
           <div className="card glass-sidebar" style={{ borderRadius:"var(--r-xl)", overflow:"hidden", animation:"fadeUp 0.4s ease 0.05s both" }}>
             {/* Header */}
-            <div style={{ padding:"20px 20px 16px", borderBottom:"1px solid var(--glass-border)", background:"rgba(255,255,255,0.02)" }}>
+            <div style={{ padding:"20px 20px 16px", borderBottom:"1px solid var(--line)", background:"var(--glass-light)" }}>
               <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", gap:8, marginBottom:10 }}>
                 <h1 style={{ fontSize:17, fontWeight:800, letterSpacing:"-0.025em", color:"var(--text)", lineHeight:1.2 }}>{cc.company_name}</h1>
                 {!sampleData && (
-                  <button className="btn btn-primary btn-sm" onClick={onAnalyze} disabled={analyzing} style={{ flexShrink:0 }}>
-                    {analyzing ? <><span className="spinner"/>…</> : "▶ Run"}
+                  <button className="btn btn-primary btn-sm" onClick={onAnalyze} disabled={analyzing} style={{ flexShrink:0, display: "flex", alignItems: "center", gap: 6 }}>
+                    {analyzing ? <><Loader2 size={14} className="animate-spin" />…</> : "▶ Run"}
                   </button>
                 )}
               </div>
-              <span className={`badge ${dc}`}>{dIcon(decision)} {decision.replace(/_/g," ").toUpperCase()}</span>
+              <span className={`badge ${dc}`} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                {React.cloneElement(dIcon(decision) as React.ReactElement)} 
+                {decision.replace(/_/g," ").toUpperCase()}
+              </span>
             </div>
 
             {/* Score gauge */}
-            <div style={{ padding:"24px 20px", borderBottom:"1px solid var(--glass-border)", textAlign:"center" }}>
+            <div style={{ padding:"24px 20px", borderBottom:"1px solid var(--line)", textAlign:"center" }}>
               <ScoreGauge score={score} />
             </div>
 
             <SideKpi label="Recommended Limit" value={fmtInr(limit)} />
             <SideKpi label="ROI" value={roi != null ? `${roi}%` : "—"} color={roi != null ? "var(--primary)" : undefined} />
             <SideKpi label="Risk Flags" value={String(flags.length)}
-              color={sevCounts.critical+sevCounts.high>0?"var(--danger)":sevCounts.medium>0?"var(--warn)":"var(--success)"} />
+              color={sevCounts.critical+sevCounts.high>0?"var(--danger)":sevCounts.medium>0?"var(--warning)":"var(--success)"} />
 
             {/* Meta */}
             <div style={{ padding:"14px 20px" }}>
@@ -360,10 +392,10 @@ export default function CasePage() {
                 {([
                   { key:"critical", color:"var(--danger)" },
                   { key:"high",     color:"var(--danger)" },
-                  { key:"medium",   color:"var(--warn)"   },
+                  { key:"medium",   color:"var(--warning)"},
                   { key:"low",      color:"var(--info)"   },
                 ] as const).map(({ key, color }) => (
-                  <div key={key} style={{ padding:"10px 14px", background:"rgba(255,255,255,0.03)", backdropFilter:"blur(8px)", border:"1px solid var(--glass-border)", borderRadius:"var(--r-md)", textAlign:"center", boxShadow:"inset 0 1px 0 var(--glass-hi)" }}>
+                  <div key={key} style={{ padding:"10px 14px", background:"var(--glass-light)", border:"1px solid var(--line)", borderRadius:"var(--r-md)", textAlign:"center", boxShadow:"inset 0 1px 0 var(--glass-hi)" }}>
                     <div style={{ fontFamily:"var(--font-mono)", fontSize:22, fontWeight:700, color:sevCounts[key]>0?color:"var(--text-3)", marginBottom:2, transition:"color 0.3s" }}>{sevCounts[key]}</div>
                     <div style={{ fontSize:10, fontWeight:700, textTransform:"uppercase", letterSpacing:"0.08em", color:"var(--text-3)" }}>{key}</div>
                   </div>
@@ -372,7 +404,9 @@ export default function CasePage() {
             </div>
           )}
 
-          <Link href="/" className="btn btn-secondary" style={{ textAlign:"center", justifyContent:"center", animation:"fadeUp 0.4s ease 0.15s both" }}>← Dashboard</Link>
+          <Link href="/" className="btn btn-secondary" style={{ display: "flex", alignItems: "center", justifyContent:"center", gap: 8, animation:"fadeUp 0.4s ease 0.15s both" }}>
+            <ArrowLeft size={16} /> Dashboard
+          </Link>
         </aside>
 
         {/* MAIN */}
@@ -382,21 +416,21 @@ export default function CasePage() {
             {/* Score Breakdown */}
             <Section title="Score Breakdown" sub="Weighted sub-score contribution to overall rating" stagger={0}>
               {Object.keys(breakdown).length === 0
-                ? <Empty icon="📊" text="Run analysis to see the score breakdown." />
+                ? <Empty icon={<BarChart3 size={32} />} text="Run analysis to see the score breakdown." />
                 : <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
                     {Object.entries(breakdown).map(([cat, val], i) => (
-                      <div key={cat} className="score-row" style={{ animationDelay: `${i * 0.06}s` }}>
-                        <span className="score-row-label">{cat.replace(/_/g," ")}</span>
-                        <div className="score-row-track">
-                          <div className="score-row-fill" style={{ width:`${val}%`, background:scoreColor(val) }} />
+                      <div key={cat} className="score-row" style={{ animationDelay: `${i * 0.06}s`, display: "flex", alignItems: "center", gap: 16 }}>
+                        <span className="score-row-label" style={{ width: "160px", fontSize: 13, color: "var(--text-2)", textTransform: "capitalize" }}>{cat.replace(/_/g," ")}</span>
+                        <div className="score-row-track" style={{ flex: 1, height: 6, background: "var(--bg-inset)", borderRadius: 6, overflow: "hidden" }}>
+                          <div className="score-row-fill" style={{ width:`${val}%`, height: "100%", borderRadius: 6, background:scoreColor(val) }} />
                         </div>
-                        <span className="score-row-val" style={{ color:scoreColor(val) }}>{val}</span>
+                        <span className="score-row-val" style={{ width: "30px", textAlign: "right", fontFamily: "var(--font-mono)", fontSize: 13, fontWeight: 700, color:scoreColor(val) }}>{val}</span>
                       </div>
                     ))}
                   </div>
               }
               {scoreResult?.decision_explanation && (
-                <p style={{ marginTop:20, paddingTop:18, borderTop:"1px solid var(--glass-border)", fontSize:14, color:"var(--text-2)", lineHeight:1.7 }}>
+                <p style={{ marginTop:20, paddingTop:18, borderTop:"1px solid var(--line)", fontSize:14, color:"var(--text-2)", lineHeight:1.7 }}>
                   {scoreResult.decision_explanation}
                 </p>
               )}
@@ -404,9 +438,13 @@ export default function CasePage() {
 
             {/* CAM */}
             <Section title="Credit Appraisal Memo" sub="AI-generated summary with key decision factors" stagger={1}
-              action={cam?.cam_doc_path ? <button className="btn btn-secondary btn-sm" onClick={()=>window.open(`${process.env.NEXT_PUBLIC_BACKEND_URL||"http://localhost:8080"}/cases/${cc.case_id}/cam/download`,"_blank")}>⬇ DOCX</button> : undefined}
+              action={cam?.cam_doc_path ? (
+                <button className="btn btn-secondary btn-sm" style={{ display: "flex", alignItems: "center", gap: 6 }} onClick={()=>window.open(`${process.env.NEXT_PUBLIC_BACKEND_URL||"http://localhost:8080"}/cases/${cc.case_id}/cam/download`,"_blank")}>
+                  <Download size={14} /> DOCX
+                </button>
+              ) : undefined}
             >
-              {!cam ? <Empty icon="📄" text="CAM not generated yet. Run analysis to generate." /> : (
+              {!cam ? <Empty icon={<FileText size={32} />} text="CAM not generated yet. Run analysis to generate." /> : (
                 <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:24 }}>
                   {cam.evidence_summary && (
                     <p style={{ fontSize:14, color:"var(--text-2)", lineHeight:1.75 }}>{cam.evidence_summary}</p>
@@ -416,7 +454,7 @@ export default function CasePage() {
                       <div style={{ fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:"0.09em", color:"var(--text-3)", marginBottom:12 }}>Key Reasons</div>
                       <div style={{ display:"flex", flexDirection:"column", gap:7 }}>
                         {reasons.slice(0,8).map((r,i) => (
-                          <div key={i} style={{ display:"flex", gap:10, alignItems:"flex-start", padding:"9px 13px", background:"rgba(255,255,255,0.03)", backdropFilter:"blur(8px)", border:"1px solid var(--glass-border)", borderRadius:"var(--r-md)", fontSize:13, color:"var(--text-2)", lineHeight:1.5, boxShadow:"inset 0 1px 0 var(--glass-hi)" }}>
+                          <div key={i} style={{ display:"flex", gap:10, alignItems:"flex-start", padding:"9px 13px", background:"var(--glass-light)", border:"1px solid var(--line)", borderRadius:"var(--r-md)", fontSize:13, color:"var(--text-2)", lineHeight:1.5, boxShadow:"inset 0 1px 0 var(--glass-hi)" }}>
                             <span style={{ color:"var(--primary)", fontWeight:700, flexShrink:0, marginTop:1 }}>›</span>{r}
                           </div>
                         ))}
@@ -429,13 +467,13 @@ export default function CasePage() {
 
             {/* Financial Facts */}
             <Section title="Extracted Financial Facts" sub="AI-extracted metrics — click any row to view evidence" stagger={2}
-              action={<span style={{ padding:"5px 13px", background:"var(--primary-2)", color:"var(--primary)", border:"1px solid var(--primary-3)", borderRadius:"var(--r-full)", fontSize:13, fontWeight:700 }}>{factKeys.length} metrics</span>}
+              action={<span style={{ padding:"5px 13px", background:"var(--primary-soft)", color:"var(--primary)", border:"1px solid var(--primary-border)", borderRadius:"var(--r-full)", fontSize:13, fontWeight:700 }}>{factKeys.length} metrics</span>}
             >
-              {factKeys.length === 0 ? <Empty icon="🔢" text="No financial facts extracted yet." /> : (
+              {factKeys.length === 0 ? <Empty icon={<Hash size={32} />} text="No financial facts extracted yet." /> : (
                 <div className="table-wrap">
                   <table className="data-table">
                     <thead>
-                      <tr><th style={{width:"30%"}}>Metric</th><th style={{width:"18%"}}>Value</th><th>Source</th><th style={{width:"120px"}}>Confidence</th><th style={{width:"60px"}}></th></tr>
+                      <tr><th style={{width:"30%"}}>Metric</th><th style={{width:"18%"}}>Value</th><th>Source</th><th style={{width:"120px"}}>Confidence</th><th style={{width:"80px"}}></th></tr>
                     </thead>
                     <tbody>
                       {factKeys.map(key => {
@@ -450,19 +488,27 @@ export default function CasePage() {
                               {isN?(key.includes("ratio")||key.includes("dscr")?(val as number).toFixed(2):fmtInr(val as number)):String(val??"N/A")}
                             </td>
                             <td style={{ fontSize:13 }}>
-                              {meta.source_ref ? <span style={{ color:"var(--text-2)" }}>📄 {meta.source_ref}</span> : <span style={{ color:"var(--text-3)" }}>—</span>}
+                              {meta.source_ref ? (
+                                <span style={{ color:"var(--text-2)", display: "flex", alignItems: "center", gap: 6 }}>
+                                  <File size={14} /> {meta.source_ref}
+                                </span>
+                              ) : <span style={{ color:"var(--text-3)" }}>—</span>}
                             </td>
                             <td>
                               {conf != null && (
                                 <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                                  <div style={{ flex:1, height:4, background:"var(--bg-surface)", borderRadius:4, overflow:"hidden" }}>
-                                    <div style={{ width:`${conf*100}%`, height:"100%", borderRadius:4, background:conf>=0.85?"var(--success)":conf>=0.7?"var(--warn)":"var(--danger)", transition:"width 0.8s ease" }} />
+                                  <div style={{ flex:1, height:4, background:"var(--bg-inset)", borderRadius:4, overflow:"hidden" }}>
+                                    <div style={{ width:`${conf*100}%`, height:"100%", borderRadius:4, background:conf>=0.85?"var(--success)":conf>=0.7?"var(--warning)":"var(--danger)", transition:"width 0.8s ease" }} />
                                   </div>
                                   <span style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--text-3)", fontWeight:600, flexShrink:0 }}>{Math.round(conf*100)}%</span>
                                 </div>
                               )}
                             </td>
-                            <td style={{ textAlign:"right" }}><span style={{ color:"var(--primary)", fontSize:12, fontWeight:700 }}>View →</span></td>
+                            <td style={{ textAlign:"right" }}>
+                              <span style={{ color:"var(--primary)", fontSize:12, fontWeight:700, display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 4 }}>
+                                View <ArrowRight size={14} />
+                              </span>
+                            </td>
                           </tr>
                         );
                       })}
@@ -480,16 +526,16 @@ export default function CasePage() {
                 {sevCounts.medium>0&&<span className="badge badge-amber">{sevCounts.medium} medium</span>}
               </div>}
             >
-              {flags.length === 0 ? <Empty icon="🛡️" text="No risk flags generated yet." /> : (
+              {flags.length === 0 ? <Empty icon={<ShieldAlert size={32} />} text="No risk flags generated yet." /> : (
                 <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14 }}>
                   {flags.map((flag, fi) => {
                     const sev = flag.severity ?? "low";
-                    const sevColor = sev==="critical"||sev==="high"?"var(--danger)":sev==="medium"?"var(--warn)":"var(--info)";
+                    const sevColor = sev==="critical"||sev==="high"?"var(--danger)":sev==="medium"?"var(--warning)":"var(--info)";
                     return (
                       <div key={flag.flag_id??flag.description}
                         className={`flag-card sev-${sev}`}
                         onClick={() => openFlagEvidence(flag)}
-                        style={{ animationDelay:`${fi*0.05}s` }}
+                        style={{ animationDelay:`${fi*0.05}s`, padding: "16px", background: "var(--glass-light)", border: "1px solid var(--line)", borderRadius: "var(--r-lg)", cursor: "pointer", borderLeft: `3px solid ${sevColor}` }}
                       >
                         <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:9 }}>
                           <span className={`badge ${sev==="critical"||sev==="high"?"badge-red":sev==="medium"?"badge-amber":"badge-blue"}`}>{sev.toUpperCase()}</span>
@@ -501,7 +547,9 @@ export default function CasePage() {
                             {flag.confidence!=null&&<span>Conf: {Math.round(flag.confidence*100)}%</span>}
                             {(flag.evidence_refs??[]).length>0&&<span>{flag.evidence_refs!.length} source(s)</span>}
                           </div>
-                          <span style={{ fontSize:12, color:"var(--primary)", fontWeight:700 }}>Evidence →</span>
+                          <span style={{ fontSize:12, color:"var(--primary)", fontWeight:700, display: "flex", alignItems: "center", gap: 4 }}>
+                            Evidence <ArrowRight size={14} />
+                          </span>
                         </div>
                       </div>
                     );
@@ -514,7 +562,7 @@ export default function CasePage() {
             {officerSigs && (
               <Section title="Officer Signal Analysis" sub="Structured signals from qualitative field observations" stagger={4}
                 action={
-                  <div style={{ padding:"8px 18px", background:`${scoreColor(officerSigs.composite_score)}12`, border:`1px solid ${scoreColor(officerSigs.composite_score)}30`, borderRadius:"var(--r-md)", backdropFilter:"blur(8px)" }}>
+                  <div style={{ padding:"8px 18px", background:`${scoreColor(officerSigs.composite_score)}12`, border:`1px solid ${scoreColor(officerSigs.composite_score)}30`, borderRadius:"var(--r-md)", display: "flex", alignItems: "baseline" }}>
                     <span style={{ fontFamily:"var(--font-mono)", fontSize:22, fontWeight:700, color:scoreColor(officerSigs.composite_score) }}>{officerSigs.composite_score}</span>
                     <span style={{ fontSize:12, color:"var(--text-3)", marginLeft:7 }}>composite</span>
                   </div>
@@ -526,7 +574,7 @@ export default function CasePage() {
                     if (!sig) return null;
                     const c = scoreColor(sig.score);
                     return (
-                      <div key={dim} style={{ padding:"16px", background:"var(--glass-bg)", backdropFilter:"blur(12px)", border:"1px solid var(--glass-border)", borderLeft:`3px solid ${c}`, borderRadius:"var(--r-lg)", boxShadow:"inset 0 1px 0 var(--glass-hi)" }}>
+                      <div key={dim} style={{ padding:"16px", background:"var(--glass)", border:"1px solid var(--line)", borderLeft:`3px solid ${c}`, borderRadius:"var(--r-lg)", boxShadow:"inset 0 1px 0 var(--glass-hi)" }}>
                         <p style={{ margin:"0 0 8px", fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:"0.09em", color:"var(--text-3)" }}>{dim.replace(/_/g," ")}</p>
                         <p style={{ margin:"0 0 8px", fontFamily:"var(--font-mono)", fontSize:28, fontWeight:700, color:c, lineHeight:1 }}>{sig.score}</p>
                         {sig.explanations?.slice(0,2).map((e,i) => <p key={i} style={{ margin:"4px 0 0", fontSize:12, color:"var(--text-3)", lineHeight:1.5 }}>· {e}</p>)}
@@ -554,7 +602,9 @@ export default function CasePage() {
                     <tbody>
                       {cc.uploaded_files!.map(f => (
                         <tr key={f.file_name}>
-                          <td style={{ fontWeight:600, color:"var(--text)" }}>📄 {f.file_name}</td>
+                          <td style={{ fontWeight:600, color:"var(--text)", display: "flex", alignItems: "center", gap: 6 }}>
+                            <File size={16} className="text-muted" /> {f.file_name}
+                          </td>
                           <td style={{ fontSize:13 }}>{f.doc_type||"—"}</td>
                           <td style={{ fontFamily:"var(--font-mono)", fontSize:12 }}>{f.uploaded_at?new Date(f.uploaded_at).toLocaleDateString():"—"}</td>
                         </tr>
@@ -568,7 +618,7 @@ export default function CasePage() {
             {/* Sample: Officer Notes */}
             {sampleData && cc.officer_notes && (
               <Section title="Officer Notes" stagger={6}>
-                <p style={{ margin:0, padding:"16px 20px", background:"var(--glass-bg)", backdropFilter:"blur(12px)", border:"1px solid var(--glass-border)", borderLeft:"3px solid var(--primary)", borderRadius:"var(--r-lg)", fontSize:14, color:"var(--text-2)", lineHeight:1.8, whiteSpace:"pre-wrap", boxShadow:"inset 0 1px 0 var(--glass-hi)" }}>
+                <p style={{ margin:0, padding:"16px 20px", background:"var(--glass)", border:"1px solid var(--line)", borderLeft:"3px solid var(--primary)", borderRadius:"var(--r-lg)", fontSize:14, color:"var(--text-2)", lineHeight:1.8, whiteSpace:"pre-wrap", boxShadow:"inset 0 1px 0 var(--glass-hi)" }}>
                   {cc.officer_notes}
                 </p>
               </Section>
