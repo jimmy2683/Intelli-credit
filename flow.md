@@ -17,7 +17,7 @@ sequenceDiagram
     participant B as Go Backend
     participant S as Shared Data Root
     participant AE as AI Engine (Python)
-    participant G as Google Gemini 2.0
+    participant M as Mistral AI (Large)
 
     U->>B: 1. Upload PDF/DOCX (Case Creation)
     B->>S: 2. Save file to data/uploads/{case_id}/
@@ -28,18 +28,19 @@ sequenceDiagram
     rect rgb(240, 240, 240)
         Note right of AE: AI Processing Pipeline
         AE->>S: 6. Load files from data/uploads/
-        AE->>AE: 7. Parse (PDFPlumber/OCR) -> Text Chunks
-        AE->>G: 8. Call Gemini (Structured Extraction)
-        G-->>AE: 9. Return JSON: Facts, Risks, Entities
-        AE->>AE: 10. Run Scoring Engine (Multi-factor)
-        AE->>AE: 11. Generate Word CAM (python-docx)
-        AE->>S: 12. Save CAM to data/evidence/{case_id}/
+        AE->>AE: 7. Parse (PDFPlumber/OCR) -> All Text Chunks
+        AE->>AE: 8. Smart Selection (Financial Keywords)
+        AE->>M: 9. Call Mistral (Structured Extraction)
+        M-->>AE: 10. Return JSON: Facts, Risks, Entities
+        AE->>AE: 11. Run Scoring Engine (Multi-factor)
+        AE->>AE: 12. Generate Word CAM (python-docx)
+        AE->>S: 13. Save CAM to data/evidence/{case_id}/
     end
 
-    AE-->>B: 13. Return Structured Analysis
-    B->>B: 14. Persist to SQLite
-    B->>U: 15. Push Live Updates (Dashboard)
-    U->>B: 16. Download CAM.docx
+    AE-->>B: 14. Return Structured Analysis
+    B->>B: 15. Persist to SQLite
+    B->>U: 16. Push Live Updates (Dashboard)
+    U->>B: 17. Download CAM.docx
 ```
 
 ## 🛠️ Detailed Component Breakdown
@@ -49,9 +50,10 @@ sequenceDiagram
 - **Tesseract OCR**: Fallback for scanned documents or images.
 - **Chunking**: Text is split into logical segments with metadata (page number, chunk ID) to maintain source traceability.
 
-### 2. Gemini AI Extraction Layer
-- **Structured Prompts**: We use a specialized "Credit Analyst" prompt to extract key financial metrics (EBITDA, PAT, Revenue) and identify qualitative risks (Auditor remarks, Related Party Transactions).
-- **Normalizer**: Converts extracted strings (e.g., "₹14,548 Crore") into normalized numbers while preserving high-confidence source references.
+### 2. Mistral AI Extraction Layer
+- **Smart Chunk Selection**: To handle 100+ page annual reports, the system scans all chunks for financial keywords (Balance Sheet, P&L, Audit) and prioritizes the most relevant context for the LLM.
+- **Structured Prompts**: We use Mistral's JSON mode to extract key financial metrics (EBITDA, PAT, Revenue) and identify qualitative risks (Auditor remarks, Related Party Transactions).
+- **Normalizer**: Converts extracted strings into normalized numbers while preserving high-confidence source references.
 
 ### 3. Credit Scoring Engine
 Combines multiple signals into a weighted final score:

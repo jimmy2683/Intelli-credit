@@ -98,7 +98,7 @@ def run_extraction_pipeline(payload: PipelineInput) -> dict[str, Any]:
                     raw_facts = merge_ai_results(raw_facts, ai_facts)
                     
                     # If AI returned risk_flags, use them
-                    if ai_facts.get("risk_flags"):
+                    if isinstance(ai_facts, dict) and ai_facts.get("risk_flags"):
                         risk_flags.extend(ai_facts["risk_flags"])
             except Exception as e:
                 logger.warning(f"AI extraction failed: {e}")

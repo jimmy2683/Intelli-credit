@@ -1,6 +1,8 @@
 package config
 
 import (
+	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -18,10 +20,12 @@ type Config struct {
 }
 
 func Load() Config {
-	timeoutSec := getEnvAsInt("BACKEND_HTTP_TIMEOUT_SEC", 15)
+	timeoutSec := getEnvAsInt("BACKEND_HTTP_TIMEOUT_SEC", 180)
 	dataRoot := getEnv("DATA_ROOT", "../data")
+
 	return Config{
-		BackendPort:       getEnv("BACKEND_PORT", "8080"),
+		// ✅ FIX: Use PORT first (Render), fallback to BACKEND_PORT (local), then 8080
+		BackendPort:       getEnv("PORT", getEnv("BACKEND_PORT", "8080")),
 		AIEngineBaseURL:   strings.TrimRight(getEnv("AI_ENGINE_BASE_URL", "http://localhost:8000"), "/"),
 		DataRoot:          dataRoot,
 		DBPath:            getEnv("DB_PATH", filepath.Join(dataRoot, "credit-intel.db")),
@@ -53,14 +57,40 @@ func getEnvAsList(key, fallback string) []string {
 	raw := getEnv(key, fallback)
 	parts := strings.Split(raw, ",")
 	out := make([]string, 0, len(parts))
+
 	for _, p := range parts {
 		clean := strings.TrimSpace(p)
 		if clean != "" {
 			out = append(out, clean)
 		}
 	}
+
 	if len(out) == 0 {
 		return []string{"*"}
 	}
+
 	return out
+}
+
+func StartSelfPing(port string) {
+
+	go func() {
+		ticker := time.NewTicker(14 * time.Minute)
+		defer ticker.Stop()
+
+		for {
+			<-ticker.C
+
+			url := "http://localhost:" + port + "/ping"
+
+			resp, err := http.Get(url)
+			if err != nil {
+				log.Println("Self ping failed:", err)
+				continue
+			}
+
+			resp.Body.Close()
+			log.Println("Self ping successful:", url)
+		}
+	}()
 }

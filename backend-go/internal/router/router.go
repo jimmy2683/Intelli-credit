@@ -13,6 +13,7 @@ import (
 func New(cfg config.Config, caseController *controller.CaseController) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", method(http.MethodGet, caseController.Health))
+	mux.HandleFunc("/ping", method(http.MethodGet, ping))
 	mux.HandleFunc("/cases", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
 			caseController.CreateCase(w, r)
@@ -92,4 +93,9 @@ func contains(values []string, target string) bool {
 		}
 	}
 	return false
+}
+
+func ping(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("pong"))
 }

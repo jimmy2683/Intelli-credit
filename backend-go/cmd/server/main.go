@@ -39,8 +39,8 @@ func main() {
 	server := &http.Server{
 		Addr:         ":" + cfg.BackendPort,
 		Handler:      handler,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 60 * time.Second,
+		ReadTimeout:  300 * time.Second,
+		WriteTimeout: 300 * time.Second,
 		IdleTimeout:  120 * time.Second,
 	}
 

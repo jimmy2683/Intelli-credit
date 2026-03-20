@@ -6,7 +6,7 @@ A slide-by-slide outline for demonstrating the solution.
 
 ### Slide 1: Title
 **Title**: Credit Intel: AI-Powered Credit Appraisal
-**Subtitle**: Automating the "Why" and "What If" in Corporate Lending.
+**Subtitle**: Automated Analysis with Mistral AI Large
 **Presenter**: [Your Name/Team Name]
 **Hook**: Cutting credit appraisal time from days to minutes with Explainable AI.
 
@@ -24,7 +24,7 @@ A slide-by-slide outline for demonstrating the solution.
 ### Slide 3: The Solution (Credit Intel)
 **Header**: A Unified Intelligence Layer
 **Content**:
-- **Structured Extraction**: Gemini-powered parsing of complex PDFs and scanned documents.
+- **Structured Extraction**: Mistral-powered parsing of complex PDFs and scanned documents.
 - **Risk Sentinel**: Automatic detection of GST/Bank mismatches and auditor red flags.
 - **Evidence-First**: Every data point links directly to a source chunk for foolproof auditing.
 - **Auto-CAM**: One-click generation of the final Credit Appraisal Memo (Word/PDF).
@@ -35,17 +35,17 @@ A slide-by-slide outline for demonstrating the solution.
 **Header**: Built for Speed & Scale
 **Content**:
 - **Go Backend**: High-concurrency orchestration & persistent storage (SQLite).
-- **Python AI Service**: Advanced OCR pipeline + Gemini 2.0 Flash for multi-modal context.
+- **Python AI Service**: Advanced OCR pipeline + Mistral AI Large for deep reasoning.
 - **Shared Data Root**: Optimized Zero-Copy document handover between services.
 - **Next.js Dashboard**: Real-time analysis with visual risk scoring (ScoreRing).
 
 ---
 
-### Slide 5: The AI Advantage (Gemini)
-**Header**: Beyond Basic OCR
+### Slide 5: The AI Advantage (Mistral & Smart Chunking)
+**Header**: Precision at Scale
 **Content**:
-- **Multi-unit Normalization**: Correctly identifies "Rs 14,548 Cr" vs "Lakhs" vs "Millions".
-- **Qualitative Context**: Summarizes complex Auditor Remarks into actionable risk signals.
+- **Smart Chunk Selection**: Systematically scans 100+ pages to find Balance Sheets and Audit Reports first.
+- **Mistral Large Reasoning**: High-fidelity extraction of "net debt", "working capital", and "auditor qualifications".
 - **Cross-Doc Validation**: Automatically flags contradictions between Officer Notes and Annual Reports.
 
 ---
