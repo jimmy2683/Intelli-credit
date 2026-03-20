@@ -44,6 +44,16 @@ func (c *CaseController) CreateCase(w http.ResponseWriter, r *http.Request) {
 	utils.WriteJSON(w, http.StatusCreated, out)
 }
 
+func (c *CaseController) ListCases(w http.ResponseWriter, r *http.Request) {
+	cases, err := c.caseService.ListCases()
+	if err != nil {
+		log.Printf("list cases error: %v", err)
+		utils.WriteError(w, http.StatusInternalServerError, "failed to list cases")
+		return
+	}
+	utils.WriteJSON(w, http.StatusOK, cases)
+}
+
 func (c *CaseController) HandleCaseRoutes(w http.ResponseWriter, r *http.Request) {
 	id, action, subAction, ok := parseCasePath(r.URL.Path)
 	if !ok {

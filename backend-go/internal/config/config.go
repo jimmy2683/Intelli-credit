@@ -19,7 +19,7 @@ type Config struct {
 
 func Load() Config {
 	timeoutSec := getEnvAsInt("BACKEND_HTTP_TIMEOUT_SEC", 15)
-	dataRoot := getEnv("DATA_ROOT", "./data")
+	dataRoot := getEnv("DATA_ROOT", "../data")
 	return Config{
 		BackendPort:       getEnv("BACKEND_PORT", "8080"),
 		AIEngineBaseURL:   strings.TrimRight(getEnv("AI_ENGINE_BASE_URL", "http://localhost:8000"), "/"),

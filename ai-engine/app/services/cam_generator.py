@@ -22,7 +22,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-DATA_ROOT = Path(os.environ.get("DATA_ROOT", "/data"))
+DATA_ROOT = Path(os.environ.get("DATA_ROOT", "../data"))
 
 # Try importing python-docx; graceful fallback to markdown if not available
 try:

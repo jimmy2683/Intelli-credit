@@ -63,6 +63,10 @@ func (s *CaseService) GetCase(id string) (*model.CreditCase, error) {
 	return c, nil
 }
 
+func (s *CaseService) ListCases() ([]*model.CreditCase, error) {
+	return s.db.ListCases()
+}
+
 func (s *CaseService) GetCAM(id string) (*model.CAMResult, error) {
 	c, err := s.GetCase(id)
 	if err != nil {

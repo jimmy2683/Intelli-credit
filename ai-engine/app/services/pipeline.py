@@ -17,10 +17,11 @@ from .contradiction_detector import detect_contradictions
 from .document_parser import parse_documents
 from .extraction import extract_structured
 from .risk_flags import generate_additional_flags
+from .ai_extraction import extract_with_ai, merge_ai_results
 
 logger = logging.getLogger(__name__)
 
-DATA_ROOT = Path(os.environ.get("DATA_ROOT", "/data"))
+DATA_ROOT = Path(os.environ.get("DATA_ROOT", "../data"))
 
 
 def _normalize_facts(raw: dict[str, Any]) -> dict[str, Any]:
@@ -80,13 +81,28 @@ def run_extraction_pipeline(payload: PipelineInput) -> dict[str, Any]:
     ]
 
     if file_meta_list:
+        print("file_meta_list", file_meta_list)
         chunks, parse_errors = parse_documents(file_meta_list, case_id)
         if parse_errors:
             logger.warning("Parse errors: %s", parse_errors)
         parsed_chunks = chunks
 
         if parsed_chunks:
+            # 1. Standard regex-based extraction
             raw_facts = extract_structured(parsed_chunks)
+            
+            # 2. AI-driven extraction
+            try:
+                ai_facts = extract_with_ai(parsed_chunks)
+                if ai_facts:
+                    raw_facts = merge_ai_results(raw_facts, ai_facts)
+                    
+                    # If AI returned risk_flags, use them
+                    if ai_facts.get("risk_flags"):
+                        risk_flags.extend(ai_facts["risk_flags"])
+            except Exception as e:
+                logger.warning(f"AI extraction failed: {e}")
+
             extracted_facts = _normalize_facts(raw_facts)
 
             contradiction_flags = detect_contradictions(
@@ -95,7 +111,10 @@ def run_extraction_pipeline(payload: PipelineInput) -> dict[str, Any]:
                 parsed_chunks,
                 file_meta_list,
             )
-            risk_flags = generate_additional_flags(raw_facts, contradiction_flags)
+            # Combine regex-detected flags with AI flags
+            all_flags = risk_flags + generate_additional_flags(raw_facts, contradiction_flags)
+            # Deduplicate or process flags if needed
+            risk_flags = all_flags
         else:
             extracted_facts = _empty_facts()
     else:

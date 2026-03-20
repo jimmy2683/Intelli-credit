@@ -11,7 +11,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-DATA_ROOT = os.environ.get("DATA_ROOT", "/data")
+DATA_ROOT = os.environ.get("DATA_ROOT", "../data")
 MIN_TEXT_FOR_OCR = 50
 CHUNK_SIZE = 1500
 CHUNK_OVERLAP = 200

@@ -147,6 +147,60 @@ func (db *DB) UpdateCase(c *model.CreditCase) error {
 	return db.InsertCase(c) // INSERT OR REPLACE
 }
 
+// ListCases returns all cases in the database, ordered by creation date (newest first).
+func (db *DB) ListCases() ([]*model.CreditCase, error) {
+	rows, err := db.conn.Query(`SELECT
+		case_id, company_name, cin_optional, sector, promoter_names,
+		officer_notes, created_at, status, uploaded_files,
+		extracted_facts, risk_flags, cam_result, score_result, officer_note_signals
+		FROM cases ORDER BY created_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var cases []*model.CreditCase
+	for rows.Next() {
+		var (
+			c                                                                 model.CreditCase
+			promoters, files, facts, flags, cam, scoreJSON, signalsJSON string
+		)
+		err := rows.Scan(
+			&c.CaseID, &c.CompanyName, &c.CINOptional, &c.Sector, &promoters,
+			&c.OfficerNotes, &c.CreatedAt, &c.Status, &files,
+			&facts, &flags, &cam, &scoreJSON, &signalsJSON,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		json.Unmarshal([]byte(promoters), &c.PromoterNames)
+		json.Unmarshal([]byte(files), &c.UploadedFiles)
+		json.Unmarshal([]byte(facts), &c.ExtractedFacts)
+		json.Unmarshal([]byte(flags), &c.RiskFlags)
+		if cam != "null" && cam != "" {
+			var camResult model.CAMResult
+			if json.Unmarshal([]byte(cam), &camResult) == nil {
+				c.CAMResult = &camResult
+			}
+		}
+		if scoreJSON != "null" && scoreJSON != "" {
+			var sr model.ScoreResult
+			if json.Unmarshal([]byte(scoreJSON), &sr) == nil {
+				c.ScoreResult = &sr
+			}
+		}
+		if signalsJSON != "null" && signalsJSON != "" {
+			var sig model.OfficerNoteSignals
+			if json.Unmarshal([]byte(signalsJSON), &sig) == nil {
+				c.OfficerNoteSignals = &sig
+			}
+		}
+		cases = append(cases, &c)
+	}
+	return cases, rows.Err()
+}
+
 // ListCaseIDs returns all case IDs in the database.
 func (db *DB) ListCaseIDs() ([]string, error) {
 	rows, err := db.conn.Query("SELECT case_id FROM cases ORDER BY created_at DESC")

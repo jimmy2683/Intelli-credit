@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import CreateCaseForm from "@/components/CreateCaseForm";
 import AnimateIn from "@/components/AnimateIn";
-import { createCase } from "@/lib/api";
+import { createCase, getCases, CreditCase } from "@/lib/api";
 import { SAMPLE_CASES } from "@/lib/sampleData";
 
 function fmtInr(v: number | undefined | null): string {
@@ -76,10 +76,26 @@ function ScoreArc({ score }: { score: number | undefined }) {
 
 export default function HomePage() {
   const router = useRouter();
-  const [loading, setLoading] = useState(false);
-  const [error, setError]     = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
-  const [showCreate, setShowCreate] = useState(false);
+  const [cases, setCases] = React.useState<CreditCase[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError]     = React.useState<string | null>(null);
+  const [success, setSuccess] = React.useState<string | null>(null);
+  const [showCreate, setShowCreate] = React.useState(false);
+
+  React.useEffect(() => {
+    async function load() {
+      try {
+        const data = await getCases();
+        setCases(data);
+      } catch (e) {
+        console.error("Failed to fetch cases:", e);
+        setError("Failed to load cases from backend.");
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
+  }, []);
 
   async function handleCreate(payload: { company_name: string; sector: string; promoter_names: string[]; officer_notes: string }) {
     if (!payload.company_name.trim()) { setError("Company name is required."); return; }
@@ -184,7 +200,7 @@ export default function HomePage() {
           <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 28 }}>
             <div>
               <h2 style={{ fontSize: 26, fontWeight: 800, letterSpacing: "-0.03em", color: "var(--text)", marginBottom: 5 }}>
-                Preloaded Cases
+                Recent Cases
               </h2>
               <p style={{ fontSize: 14, color: "var(--text-3)" }}>Click any case to open the full analysis dashboard</p>
             </div>
@@ -192,66 +208,78 @@ export default function HomePage() {
               padding: "5px 14px", background: "var(--primary-soft)", color: "var(--primary)",
               border: "1px solid var(--primary-border)", borderRadius: "var(--r-full)",
               fontSize: 13, fontWeight: 700, backdropFilter: "blur(8px)",
-            }}>{SAMPLE_CASES.length} cases</span>
+            }}>{cases.length} cases</span>
           </div>
         </AnimateIn>
 
         <AnimateIn stagger={2}>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(420px, 1fr))", gap: 24 }}>
-            {SAMPLE_CASES.map((c) => {
-              const score = c.score_result?.overall_score ?? c.cam_result?.overall_score;
-              const dec = c.score_result?.decision ?? c.cam_result?.final_decision ?? "pending";
-              const flags = c.risk_flags?.length ?? 0;
-              const crit = c.risk_flags?.filter(f => f.severity === "critical" || f.severity === "high").length ?? 0;
-              const dc = dClass(dec);
-              const accent = score != null && score >= 70 ? "var(--success)" : score != null && score >= 50 ? "var(--warning)" : "var(--danger)";
+            {loading ? (
+              <div style={{ gridColumn: "1/-1", textAlign: "center", padding: "40px", color: "var(--text-3)" }}>
+                <Activity size={32} style={{ animation: "spin 2s linear infinite", marginBottom: 12 }} />
+                <p>Loading cases...</p>
+              </div>
+            ) : cases.length === 0 ? (
+              <div style={{ gridColumn: "1/-1", textAlign: "center", padding: "40px", color: "var(--text-3)", background: "var(--glass-light)", borderRadius: "var(--r-lg)", border: "1px dashed var(--line)" }}>
+                <Database size={32} style={{ marginBottom: 12, opacity: 0.5 }} />
+                <p>No cases found. Create a new one below.</p>
+              </div>
+            ) : (
+              cases.map((c) => {
+                const score = c.score_result?.overall_score ?? c.cam_result?.overall_score;
+                const dec = c.score_result?.decision ?? c.cam_result?.final_decision ?? "pending";
+                const flags = c.risk_flags?.length ?? 0;
+                const crit = c.risk_flags?.filter(f => (f.severity === "critical" || f.severity === "high")).length ?? 0;
+                const dc = dClass(dec);
+                const accent = score != null && score >= 70 ? "var(--success)" : score != null && score >= 50 ? "var(--warning)" : "var(--danger)";
 
-              return (
-                <Link key={c.case_id} href={`/cases/${c.case_id}`} style={{ textDecoration: "none", color: "inherit" }}>
-                  <div
-                    className="card"
-                    style={{ padding: "28px", borderTop: `3px solid ${accent}`, cursor: "pointer", display: "flex", flexDirection: "column", height: "100%" }}
-                  >
-                    <div style={{ display: "flex", alignItems: "flex-start", gap: 20, marginBottom: 24 }}>
-                      <ScoreArc score={score} />
-                      <div style={{ flex: 1, minWidth: 0, marginTop: 4 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
-                          <span style={{ fontSize: 18, fontWeight: 700, color: "var(--text)", letterSpacing: "-0.01em" }}>{c.company_name}</span>
-                          <span className={`badge ${dc}`}>
-                            {dIcon(dec, 12)} {dec.replace(/_/g, " ").toUpperCase()}
-                          </span>
+                return (
+                  <Link key={c.case_id} href={`/cases/${c.case_id}`} style={{ textDecoration: "none", color: "inherit" }}>
+                    <div
+                      className="card"
+                      style={{ padding: "28px", borderTop: `3px solid ${accent}`, cursor: "pointer", display: "flex", flexDirection: "column", height: "100%" }}
+                    >
+                      <div style={{ display: "flex", alignItems: "flex-start", gap: 20, marginBottom: 24 }}>
+                        <ScoreArc score={score} />
+                        <div style={{ flex: 1, minWidth: 0, marginTop: 4 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
+                            <span style={{ fontSize: 18, fontWeight: 700, color: "var(--text)", letterSpacing: "-0.01em" }}>{c.company_name}</span>
+                            <span className={`badge ${dc}`}>
+                              {dIcon(dec, 12)} {dec.replace(/_/g, " ").toUpperCase()}
+                            </span>
+                          </div>
+                          <p style={{ fontSize: 13, color: "var(--text-2)", margin: 0, lineHeight: 1.5 }}>
+                            {c.sector}{(c.promoter_names ?? []).length > 0 && <> &nbsp;·&nbsp; {c.promoter_names!.join(", ")}</>}
+                          </p>
                         </div>
-                        <p style={{ fontSize: 13, color: "var(--text-2)", margin: 0, lineHeight: 1.5 }}>
-                          {c.sector}{(c.promoter_names ?? []).length > 0 && <> &nbsp;·&nbsp; {c.promoter_names!.join(", ")}</>}
-                        </p>
+                      </div>
+
+                      <div style={{
+                        display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 0,
+                        background: "var(--glass-light)", borderRadius: "var(--r-md)",
+                        border: "1px solid var(--line)", overflow: "hidden",
+                        backdropFilter: "blur(10px)", marginTop: "auto"
+                      }}>
+                        {[
+                          { l: "Credit Limit", v: fmtInr(c.cam_result?.recommended_limit) },
+                          { l: "Risk Flags", v: String(flags) + (crit > 0 ? ` (${crit}⚠)` : "") },
+                          { l: "ROI", v: c.cam_result?.recommended_roi ? `${c.cam_result.recommended_roi}%` : "—" },
+                        ].map((s, si) => (
+                          <div key={s.l} style={{ padding: "14px 16px", borderRight: si < 2 ? "1px solid var(--line)" : "none" }}>
+                            <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>{s.l}</div>
+                            <div style={{ fontFamily: "var(--font-mono)", fontSize: 15, fontWeight: 600, color: s.l === "Risk Flags" && crit > 0 ? "var(--danger)" : "var(--text)" }}>{s.v}</div>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div style={{ marginTop: 20, textAlign: "right", fontSize: 13, fontWeight: 700, color: "var(--primary)", display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 6 }}>
+                        Open Analysis <ArrowRight size={14} />
                       </div>
                     </div>
-
-                    <div style={{
-                      display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 0,
-                      background: "var(--glass-light)", borderRadius: "var(--r-md)",
-                      border: "1px solid var(--line)", overflow: "hidden",
-                      backdropFilter: "blur(10px)", marginTop: "auto"
-                    }}>
-                      {[
-                        { l: "Credit Limit", v: fmtInr(c.cam_result?.recommended_limit) },
-                        { l: "Risk Flags", v: String(flags) + (crit > 0 ? ` (${crit}⚠)` : "") },
-                        { l: "ROI", v: c.cam_result?.recommended_roi ? `${c.cam_result.recommended_roi}%` : "—" },
-                      ].map((s, si) => (
-                        <div key={s.l} style={{ padding: "14px 16px", borderRight: si < 2 ? "1px solid var(--line)" : "none" }}>
-                          <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text-3)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>{s.l}</div>
-                          <div style={{ fontFamily: "var(--font-mono)", fontSize: 15, fontWeight: 600, color: s.l === "Risk Flags" && crit > 0 ? "var(--danger)" : "var(--text)" }}>{s.v}</div>
-                        </div>
-                      ))}
-                    </div>
-
-                    <div style={{ marginTop: 20, textAlign: "right", fontSize: 13, fontWeight: 700, color: "var(--primary)", display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 6 }}>
-                      Open Analysis <ArrowRight size={14} />
-                    </div>
-                  </div>
-                </Link>
-              );
-            })}
+                  </Link>
+                );
+              })
+            )}
           </div>
         </AnimateIn>
       </section>

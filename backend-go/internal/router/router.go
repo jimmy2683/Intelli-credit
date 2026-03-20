@@ -13,7 +13,17 @@ import (
 func New(cfg config.Config, caseController *controller.CaseController) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", method(http.MethodGet, caseController.Health))
-	mux.HandleFunc("/cases", method(http.MethodPost, caseController.CreateCase))
+	mux.HandleFunc("/cases", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			caseController.CreateCase(w, r)
+		} else if r.Method == http.MethodGet {
+			caseController.ListCases(w, r)
+		} else if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+		} else {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	})
 	mux.HandleFunc("/cases/", caseController.HandleCaseRoutes)
 
 	return recoverer(logger(cors(cfg.CORSAllowedOrigin, mux)))
