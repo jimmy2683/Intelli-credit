@@ -46,6 +46,7 @@ func main() {
 		log.Println("S3 credentials not provided, falling back to local storage")
 	}
 
+	log.Println("AI BASE URL:", cfg.AIEngineBaseURL)
 	aiClient := client.NewAIClient(cfg.AIEngineBaseURL, cfg.HTTPTimeout)
 	caseService := service.NewCaseService(cfg, aiClient, s3Client, db)
 	caseController := controller.NewCaseController(caseService)
