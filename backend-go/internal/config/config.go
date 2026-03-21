@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/joho/godotenv"
 )
 
 type Config struct {
@@ -23,23 +25,43 @@ type Config struct {
 	AWSS3Bucket       string
 }
 
+// Load environment variables (only once)
+func init() {
+	err := godotenv.Load()
+	if err != nil {
+		log.Println("⚠️ No .env file found (expected in production)")
+	}
+}
+
 func Load() Config {
 	timeoutSec := getEnvAsInt("BACKEND_HTTP_TIMEOUT_SEC", 180)
 	dataRoot := getEnv("DATA_ROOT", "../data")
 
-	return Config{
-		// ✅ FIX: Use PORT first (Render), fallback to BACKEND_PORT (local), then 8080
+	cfg := Config{
+		// Render-compatible port handling
 		BackendPort:       getEnv("PORT", getEnv("BACKEND_PORT", "8080")),
 		AIEngineBaseURL:   strings.TrimRight(getEnv("AI_ENGINE_BASE_URL", "http://localhost:8000"), "/"),
 		DataRoot:          dataRoot,
 		DBPath:            getEnv("DB_PATH", filepath.Join(dataRoot, "credit-intel.db")),
 		CORSAllowedOrigin: getEnvAsList("CORS_ALLOWED_ORIGINS", "*"),
 		HTTPTimeout:       time.Duration(timeoutSec) * time.Second,
-		AWSAccessKey:      getEnv("AWS_ACCESS_KEY_ID", ""),
-		AWSSecretKey:      getEnv("AWS_SECRET_ACCESS_KEY", ""),
-		AWSRegion:         getEnv("AWS_REGION", "us-east-1"),
-		AWSS3Bucket:       getEnv("AWS_S3_BUCKET", ""),
+
+		// AWS config (correct region default)
+		AWSAccessKey: getEnv("AWS_ACCESS_KEY_ID", ""),
+		AWSSecretKey: getEnv("AWS_SECRET_ACCESS_KEY", ""),
+		AWSRegion:    getEnv("AWS_REGION", "ap-southeast-2"), // FIXED
+		AWSS3Bucket:  getEnv("AWS_S3_BUCKET", ""),
 	}
+
+	// Validation (fail fast)
+	if cfg.AWSAccessKey == "" || cfg.AWSSecretKey == "" {
+		log.Println("⚠️ AWS credentials missing")
+	}
+	if cfg.AWSS3Bucket == "" {
+		log.Println("⚠️ AWS_S3_BUCKET not set")
+	}
+
+	return cfg
 }
 
 func getEnv(key, fallback string) string {
@@ -80,15 +102,19 @@ func getEnvAsList(key, fallback string) []string {
 	return out
 }
 
+// Optional: self ping (disabled on Render)
 func StartSelfPing(port string) {
+	// Skip in Render
+	if os.Getenv("RENDER") != "" {
+		log.Println("Skipping self-ping on Render")
+		return
+	}
 
 	go func() {
 		ticker := time.NewTicker(14 * time.Minute)
 		defer ticker.Stop()
 
-		for {
-			<-ticker.C
-
+		for range ticker.C {
 			url := "http://localhost:" + port + "/ping"
 
 			resp, err := http.Get(url)

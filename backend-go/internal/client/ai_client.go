@@ -128,3 +128,28 @@ func (c *AIClient) post(path string, payload any) (map[string]any, error) {
 	}
 	return out, nil
 }
+
+
+func (c *AIClient) Ping() error {
+	url := c.baseURL + "/ping"
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("status %d", resp.StatusCode)
+	}
+
+	return nil
+}

@@ -43,7 +43,11 @@ Render disks cannot be shared between different services. S3 allows:
 5.  **Start Command**: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`.
 6.  **Environment Variables**:
     - `MISTRAL_API_KEY`: your-key
-    - `DATA_ROOT`: `/tmp/data` (temporary processing dir)
+    - `AWS_ACCESS_KEY_ID`: your-access-key
+    - `AWS_SECRET_ACCESS_KEY`: your-secret-key
+    - `AWS_REGION`: your-region (e.g., us-east-1)
+    - `AWS_S3_BUCKET`: your-bucket-name
+    - `DATA_ROOT`: `/tmp/data` (fallback for local files)
 
 ### B. Backend (Go)
 1.  **New -> Web Service**.
@@ -56,6 +60,10 @@ Render disks cannot be shared between different services. S3 allows:
     - `DATABASE_URL`: (from your Render Postgres)
     - `AI_ENGINE_BASE_URL`: (the URL provided by Render for the AI Engine service)
     - `BACKEND_HTTP_TIMEOUT_SEC`: `180`
+    - `AWS_ACCESS_KEY_ID`: your-access-key
+    - `AWS_SECRET_ACCESS_KEY`: your-secret-key
+    - `AWS_REGION`: your-region
+    - `AWS_S3_BUCKET`: your-bucket-name
 
 ### C. Frontend (Vercel) — ✅ Already Hosted
 1.  **Vercel Dashboard**: Go to Project Settings -> Environment Variables.

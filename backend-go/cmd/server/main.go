@@ -33,8 +33,21 @@ func main() {
 	db.SeedSampleData()
 
 	// ── Services ──
+	var s3Client *client.S3Client
+	if cfg.AWSAccessKey != "" && cfg.AWSSecretKey != "" && cfg.AWSS3Bucket != "" {
+		var err error
+		s3Client, err = client.NewS3Client(cfg.AWSAccessKey, cfg.AWSSecretKey, cfg.AWSRegion, cfg.AWSS3Bucket)
+		if err != nil {
+			log.Printf("failed to initialize s3 client: %v", err)
+		} else {
+			log.Printf("S3 client initialized for bucket: %s", cfg.AWSS3Bucket)
+		}
+	} else {
+		log.Println("S3 credentials not provided, falling back to local storage")
+	}
+
 	aiClient := client.NewAIClient(cfg.AIEngineBaseURL, cfg.HTTPTimeout)
-	caseService := service.NewCaseService(cfg, aiClient, db)
+	caseService := service.NewCaseService(cfg, aiClient, s3Client, db)
 	caseController := controller.NewCaseController(caseService)
 
 	handler := router.New(cfg, caseController)

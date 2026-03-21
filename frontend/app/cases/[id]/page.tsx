@@ -38,16 +38,73 @@ function fmtInr(v: number | undefined | null) {
   if (Math.abs(v) >= 1e5) return `₹${(v / 1e5).toFixed(2)} L`;
   return `₹${v.toLocaleString("en-IN")}`;
 }
-function factValue(f: unknown): number | string | undefined {
-  if (f == null) return undefined;
-  if (typeof f === "object" && f !== null && "value" in f) return (f as Record<string,unknown>).value as number;
-  if (typeof f === "number" || typeof f === "string") return f;
-  return undefined;
+
+/**
+ * Keys that represent monetary amounts (revenues, debts, profits, etc.)
+ * Everything else with a numeric value should NOT get the ₹ symbol.
+ */
+const MONETARY_KEYS = new Set([
+  "revenue", "ebitda", "pat", "total_debt", "net_profit",
+  "gross_profit", "working_capital", "capex", "cash_and_equivalents",
+  "total_assets", "total_liabilities", "net_worth", "borrowings",
+  "sales", "turnover", "income", "expenses", "depreciation", "interest_expense",
+]);
+
+/**
+ * Keys that are dimensionless ratios / scores (display as plain decimal).
+ */
+const RATIO_KEYS = new Set([
+  "current_ratio", "dscr", "debt_to_equity", "interest_coverage",
+  "quick_ratio", "asset_turnover", "gross_margin", "net_margin",
+  "roe", "roa", "roce",
+]);
+
+/** Format a fact value correctly based on what type of metric it is. */
+function formatFactValue(key: string, val: unknown): string {
+  if (val == null) return "N/A";
+
+  if (Array.isArray(val)) {
+    return val.length > 0 ? val.join("; ") : "N/A";
+  }
+
+  if (typeof val === "string") return val.trim() || "N/A";
+
+  if (typeof val === "number") {
+    const k = key.toLowerCase();
+    if (RATIO_KEYS.has(k)) return val.toFixed(2);
+    if (MONETARY_KEYS.has(k)) return fmtInr(val);
+    // Fallback: if the number looks like a large integer it might be monetary
+    if (Number.isInteger(val) && Math.abs(val) >= 10000) return fmtInr(val);
+    // Small numbers (like 1.85 for ratios not in our set, or percentages)
+    return val % 1 === 0 ? String(val) : val.toFixed(2);
+  }
+
+  return String(val);
 }
+
+/**
+ * Given a flat extracted_facts object and a base key (e.g. "revenue"),
+ * return the associated confidence and source_ref from the sibling keys.
+ */
+function getFlatMeta(facts: Record<string, unknown>, key: string): {
+  confidence: number | undefined;
+  source_ref: string | undefined;
+} {
+  const rawConf = facts[`${key}_confidence`];
+  const rawSrc  = facts[`${key}_source_ref`];
+  return {
+    confidence: typeof rawConf === "number" ? rawConf : undefined,
+    source_ref: typeof rawSrc === "string" && rawSrc.trim() ? rawSrc.trim() : undefined,
+  };
+}
+
+/** Legacy helper kept for risk-flag evidence that still uses the nested shape. */
 function factMeta(f: unknown) {
-  if (f && typeof f === "object" && "source_ref" in f) return f as { source_ref?: string; page_ref?: string; snippet?: string; confidence?: number };
+  if (f && typeof f === "object" && "source_ref" in f)
+    return f as { source_ref?: string; page_ref?: string; snippet?: string; confidence?: number };
   return {} as { source_ref?: string; page_ref?: string; snippet?: string; confidence?: number };
 }
+
 function scoreColor(v: number) {
   if (v >= 70) return "var(--success)";
   if (v >= 50) return "var(--warning)";
@@ -79,7 +136,10 @@ function ScoreGauge({ score }: { score: number | undefined }) {
   const ref = useRef<HTMLDivElement>(null);
   
   useEffect(() => {
-    const obs = new IntersectionObserver(([e]) => { if (e.isIntersecting) { setAnimated(true); obs.disconnect(); } }, { threshold: 0.3 });
+    const obs = new IntersectionObserver(
+      ([e]) => { if (e.isIntersecting) { setAnimated(true); obs.disconnect(); } },
+      { threshold: 0.3 }
+    );
     if (ref.current) obs.observe(ref.current);
     return () => obs.disconnect();
   }, []);
@@ -150,6 +210,22 @@ function Empty({ icon, text }: { icon: React.ReactNode; text: string }) {
   );
 }
 
+/** Inline confidence pill with a bar + percentage label. */
+function ConfidencePill({ value }: { value: number }) {
+  const pct = Math.round(value * 100);
+  const color = value >= 0.85 ? "var(--success)" : value >= 0.7 ? "var(--warning)" : "var(--danger)";
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <div style={{ flex: 1, height: 4, background: "var(--bg-inset)", borderRadius: 4, overflow: "hidden", minWidth: 60 }}>
+        <div style={{ width: `${pct}%`, height: "100%", borderRadius: 4, background: color, transition: "width 0.8s ease" }} />
+      </div>
+      <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-3)", fontWeight: 600, flexShrink: 0 }}>
+        {pct}%
+      </span>
+    </div>
+  );
+}
+
 /* ═══════════ PAGE ═══════════ */
 export default function CasePage() {
   const params = useParams<{ id: string }>();
@@ -172,7 +248,7 @@ export default function CasePage() {
   const cc          = sampleData ?? caseData;
   const cam         = sampleData?.cam_result ?? camData ?? cc?.cam_result ?? null;
   const scoreResult = (sampleData?.score_result ?? (cc as Record<string,unknown>)?.score_result) as SampleCase["score_result"] | undefined;
-  const facts       = cc?.extracted_facts ?? {};
+  const facts       = (cc?.extracted_facts ?? {}) as Record<string, unknown>;
   const flags       = cc?.risk_flags ?? [];
   const decision    = scoreResult?.decision ?? cam?.final_decision ?? "pending";
   const score       = scoreResult?.overall_score ?? cam?.overall_score;
@@ -181,7 +257,17 @@ export default function CasePage() {
   const roi         = scoreResult?.recommended_roi ?? cam?.recommended_roi;
   const officerSigs = scoreResult?.officer_note_signals;
   const reasons     = scoreResult?.reasons ?? cam?.key_reasons ?? [];
-  const factKeys    = Object.keys(facts).filter(k => !["extracted_entities","document_sources","auditor_remarks"].includes(k));
+
+  /**
+   * Only include base metric keys — exclude:
+   *  • Internal meta arrays/objects (extracted_entities, document_sources, auditor_remarks)
+   *  • Sibling "_confidence" and "_source_ref" keys (shown inline in each row instead)
+   */
+  const factKeys = Object.keys(facts).filter(k =>
+    !["extracted_entities", "document_sources", "auditor_remarks"].includes(k) &&
+    !k.endsWith("_confidence") &&
+    !k.endsWith("_source_ref")
+  );
 
   const fetchCase = useCallback(async () => {
     if (!caseId) return;
@@ -233,12 +319,14 @@ export default function CasePage() {
   }
   
   function openFactEvidence(key: string) {
-    const meta = factMeta(facts[key]); const val = factValue(facts[key]);
-    setDrawerItems(meta.source_ref ? [{
-      source_document: meta.source_ref, page_or_section: meta.page_ref ?? "N/A",
-      snippet: meta.snippet ?? `Value: ${typeof val === "number" ? fmtInr(val) : val ?? "N/A"}`,
-      confidence: meta.confidence ?? 0.5,
-      why_it_matters: `This data point (${key.replace(/_/g," ")}) directly influences the credit score.`,
+    const { confidence, source_ref } = getFlatMeta(facts, key);
+    const val = facts[key];
+    setDrawerItems(source_ref ? [{
+      source_document: source_ref,
+      page_or_section: "N/A",
+      snippet: `Value: ${formatFactValue(key, val)}`,
+      confidence: confidence ?? 0.5,
+      why_it_matters: `This data point (${key.replace(/_/g, " ")}) directly influences the credit score.`,
     }] : []);
     setDrawerTitle(key.replace(/_/g," ").replace(/\b\w/g,c=>c.toUpperCase()));
     setDrawerSev(undefined); setDrawerOpen(true);
@@ -264,6 +352,11 @@ export default function CasePage() {
   const sevCounts = { critical:0, high:0, medium:0, low:0 };
   flags.forEach(f => { const s=(f.severity??"low") as keyof typeof sevCounts; if (s in sevCounts) sevCounts[s]++; });
   const dc = dClass(decision);
+
+  /* Auditor remarks (special display) */
+  const auditorRemarks = Array.isArray(facts.auditor_remarks)
+    ? (facts.auditor_remarks as string[])
+    : [];
 
   return (
     <>
@@ -325,7 +418,9 @@ export default function CasePage() {
           </div>
           <div style={{ textAlign:"right" }}>
             <div className="db-score" style={{ fontSize: 36, fontWeight: 800, fontFamily: "var(--font-mono)" }}>{score.toFixed(1)}</div>
-            <div className="db-score-sub" style={{ fontSize: 12, opacity: 0.8, marginTop: 4 }}>{[limit&&`Limit: ${fmtInr(limit)}`, roi&&`ROI: ${roi}%`].filter(Boolean).join("  ·  ")}</div>
+            <div className="db-score-sub" style={{ fontSize: 12, opacity: 0.8, marginTop: 4 }}>
+              {[limit && `Limit: ${fmtInr(limit)}`, roi && `ROI: ${roi}%`].filter(Boolean).join("  ·  ")}
+            </div>
           </div>
         </div>
       )}
@@ -420,11 +515,13 @@ export default function CasePage() {
                 : <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
                     {Object.entries(breakdown).map(([cat, val], i) => (
                       <div key={cat} className="score-row" style={{ animationDelay: `${i * 0.06}s`, display: "flex", alignItems: "center", gap: 16 }}>
-                        <span className="score-row-label" style={{ width: "160px", fontSize: 13, color: "var(--text-2)", textTransform: "capitalize" }}>{cat.replace(/_/g," ")}</span>
+                        <span className="score-row-label" style={{ width: "180px", fontSize: 13, color: "var(--text-2)", textTransform: "capitalize" }}>
+                          {cat.replace(/_/g," ")}
+                        </span>
                         <div className="score-row-track" style={{ flex: 1, height: 6, background: "var(--bg-inset)", borderRadius: 6, overflow: "hidden" }}>
                           <div className="score-row-fill" style={{ width:`${val}%`, height: "100%", borderRadius: 6, background:scoreColor(val) }} />
                         </div>
-                        <span className="score-row-val" style={{ width: "30px", textAlign: "right", fontFamily: "var(--font-mono)", fontSize: 13, fontWeight: 700, color:scoreColor(val) }}>{val}</span>
+                        <span className="score-row-val" style={{ width: "36px", textAlign: "right", fontFamily: "var(--font-mono)", fontSize: 13, fontWeight: 700, color:scoreColor(val) }}>{val}</span>
                       </div>
                     ))}
                   </div>
@@ -439,7 +536,8 @@ export default function CasePage() {
             {/* CAM */}
             <Section title="Credit Appraisal Memo" sub="AI-generated summary with key decision factors" stagger={1}
               action={cam?.cam_doc_path ? (
-                <button className="btn btn-secondary btn-sm" style={{ display: "flex", alignItems: "center", gap: 6 }} onClick={()=>window.open(`${process.env.NEXT_PUBLIC_BACKEND_URL||"http://localhost:8080"}/cases/${cc.case_id}/cam/download`,"_blank")}>
+                <button className="btn btn-secondary btn-sm" style={{ display: "flex", alignItems: "center", gap: 6 }}
+                  onClick={()=>window.open(`${process.env.NEXT_PUBLIC_BACKEND_URL||"http://localhost:8080"}/cases/${cc.case_id}/cam/download`,"_blank")}>
                   <Download size={14} /> DOCX
                 </button>
               ) : undefined}
@@ -465,61 +563,100 @@ export default function CasePage() {
               )}
             </Section>
 
-            {/* Financial Facts */}
-            <Section title="Extracted Financial Facts" sub="AI-extracted metrics — click any row to view evidence" stagger={2}
-              action={<span style={{ padding:"5px 13px", background:"var(--primary-soft)", color:"var(--primary)", border:"1px solid var(--primary-border)", borderRadius:"var(--r-full)", fontSize:13, fontWeight:700 }}>{factKeys.length} metrics</span>}
-            >
-              {factKeys.length === 0 ? <Empty icon={<Hash size={32} />} text="No financial facts extracted yet." /> : (
-                <div className="table-wrap">
-                  <table className="data-table">
-                    <thead>
-                      <tr><th style={{width:"30%"}}>Metric</th><th style={{width:"18%"}}>Value</th><th>Source</th><th style={{width:"120px"}}>Confidence</th><th style={{width:"80px"}}></th></tr>
-                    </thead>
-                    <tbody>
-                      {factKeys.map(key => {
-                        const meta = factMeta(facts[key]);
-                        const val  = factValue(facts[key]);
-                        const conf = meta.confidence;
-                        const isN  = typeof val === "number";
-                        return (
-                          <tr key={key} onClick={() => openFactEvidence(key)} style={{ cursor:"pointer" }}>
-                            <td style={{ fontWeight:600, color:"var(--text)" }}>{key.replace(/_/g," ").replace(/\b\w/g,c=>c.toUpperCase())}</td>
-                            <td className="mono" style={{ fontWeight:600, color:"var(--text)", fontSize:13 }}>
-                              {isN?(key.includes("ratio")||key.includes("dscr")?(val as number).toFixed(2):fmtInr(val as number)):String(val??"N/A")}
-                            </td>
-                            <td style={{ fontSize:13 }}>
-                              {meta.source_ref ? (
-                                <span style={{ color:"var(--text-2)", display: "flex", alignItems: "center", gap: 6 }}>
-                                  <File size={14} /> {meta.source_ref}
-                                </span>
-                              ) : <span style={{ color:"var(--text-3)" }}>—</span>}
-                            </td>
-                            <td>
-                              {conf != null && (
-                                <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                                  <div style={{ flex:1, height:4, background:"var(--bg-inset)", borderRadius:4, overflow:"hidden" }}>
-                                    <div style={{ width:`${conf*100}%`, height:"100%", borderRadius:4, background:conf>=0.85?"var(--success)":conf>=0.7?"var(--warning)":"var(--danger)", transition:"width 0.8s ease" }} />
-                                  </div>
-                                  <span style={{ fontFamily:"var(--font-mono)", fontSize:11, color:"var(--text-3)", fontWeight:600, flexShrink:0 }}>{Math.round(conf*100)}%</span>
-                                </div>
-                              )}
-                            </td>
-                            <td style={{ textAlign:"right" }}>
-                              <span style={{ color:"var(--primary)", fontSize:12, fontWeight:700, display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 4 }}>
-                                View <ArrowRight size={14} />
-                              </span>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+            {/* Auditor Remarks (standalone, only when present) */}
+            {auditorRemarks.length > 0 && (
+              <Section title="Auditor Remarks" sub="Observations from statutory auditors" stagger={2}>
+                <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                  {auditorRemarks.map((remark, i) => (
+                    <div key={i} style={{ display:"flex", gap:12, alignItems:"flex-start", padding:"12px 16px", background:"var(--glass-light)", border:"1px solid var(--line)", borderLeft:"3px solid var(--info)", borderRadius:"var(--r-md)", fontSize:14, color:"var(--text-2)", lineHeight:1.6 }}>
+                      <span style={{ color:"var(--info)", fontWeight:700, flexShrink:0 }}>✓</span>
+                      {remark}
+                    </div>
+                  ))}
                 </div>
-              )}
+              </Section>
+            )}
+
+            {/* Financial Facts */}
+            <Section title="Extracted Financial Facts"
+              sub="AI-extracted metrics from uploaded documents — click any row to view source evidence"
+              stagger={3}
+              action={
+                <span style={{ padding:"5px 13px", background:"var(--primary-soft)", color:"var(--primary)", border:"1px solid var(--primary-border)", borderRadius:"var(--r-full)", fontSize:13, fontWeight:700 }}>
+                  {factKeys.length} metrics
+                </span>
+              }
+            >
+              {factKeys.length === 0
+                ? <Empty icon={<Hash size={32} />} text="No financial facts extracted yet." />
+                : (
+                  <div className="table-wrap">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th style={{ width:"28%" }}>Metric</th>
+                          <th style={{ width:"18%" }}>Value</th>
+                          <th style={{ width:"20%" }}>Source</th>
+                          <th style={{ width:"24%" }}>Confidence</th>
+                          <th style={{ width:"10%" }}></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {factKeys.map(key => {
+                          const val = facts[key];
+                          const { confidence, source_ref } = getFlatMeta(facts, key);
+                          const displayValue = formatFactValue(key, val);
+                          const isNA = displayValue === "N/A";
+
+                          return (
+                            <tr key={key} onClick={() => openFactEvidence(key)} style={{ cursor:"pointer", opacity: isNA ? 0.55 : 1 }}>
+                              {/* Metric name */}
+                              <td style={{ fontWeight:600, color:"var(--text)" }}>
+                                {key.replace(/_/g," ").replace(/\b\w/g,c=>c.toUpperCase())}
+                              </td>
+
+                              {/* Value — no ₹ for ratios/scores/plain numbers */}
+                              <td className="mono" style={{ fontWeight:600, color: isNA ? "var(--text-3)" : "var(--text)", fontSize:13 }}>
+                                {displayValue}
+                              </td>
+
+                              {/* Source reference */}
+                              <td style={{ fontSize:12 }}>
+                                {source_ref
+                                  ? <span style={{ color:"var(--text-2)", display:"flex", alignItems:"center", gap:5 }}>
+                                      <File size={13} style={{ flexShrink:0 }} />
+                                      <span style={{ wordBreak:"break-all" }}>{source_ref}</span>
+                                    </span>
+                                  : <span style={{ color:"var(--text-3)" }}>—</span>
+                                }
+                              </td>
+
+                              {/* Confidence bar — only when a number is available */}
+                              <td>
+                                {confidence != null
+                                  ? <ConfidencePill value={confidence} />
+                                  : <span style={{ color:"var(--text-3)", fontSize:12 }}>—</span>
+                                }
+                              </td>
+
+                              {/* Action */}
+                              <td style={{ textAlign:"right" }}>
+                                <span style={{ color:"var(--primary)", fontSize:12, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"flex-end", gap:4 }}>
+                                  View <ArrowRight size={14} />
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )
+              }
             </Section>
 
             {/* Risk Flags */}
-            <Section title="Risk Flags" sub="Identified risk factors — click any card to view source evidence" stagger={3}
+            <Section title="Risk Flags" sub="Identified risk factors — click any card to view source evidence" stagger={4}
               action={<div style={{ display:"flex", gap:6 }}>
                 {sevCounts.critical>0&&<span className="badge badge-red">{sevCounts.critical} critical</span>}
                 {sevCounts.high>0&&<span className="badge badge-red">{sevCounts.high} high</span>}
@@ -535,7 +672,7 @@ export default function CasePage() {
                       <div key={flag.flag_id??flag.description}
                         className={`flag-card sev-${sev}`}
                         onClick={() => openFlagEvidence(flag)}
-                        style={{ animationDelay:`${fi*0.05}s`, padding: "16px", background: "var(--glass-light)", border: "1px solid var(--line)", borderRadius: "var(--r-lg)", cursor: "pointer", borderLeft: `3px solid ${sevColor}` }}
+                        style={{ animationDelay:`${fi*0.05}s`, padding:"16px", background:"var(--glass-light)", border:"1px solid var(--line)", borderRadius:"var(--r-lg)", cursor:"pointer", borderLeft:`3px solid ${sevColor}` }}
                       >
                         <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:9 }}>
                           <span className={`badge ${sev==="critical"||sev==="high"?"badge-red":sev==="medium"?"badge-amber":"badge-blue"}`}>{sev.toUpperCase()}</span>
@@ -547,7 +684,7 @@ export default function CasePage() {
                             {flag.confidence!=null&&<span>Conf: {Math.round(flag.confidence*100)}%</span>}
                             {(flag.evidence_refs??[]).length>0&&<span>{flag.evidence_refs!.length} source(s)</span>}
                           </div>
-                          <span style={{ fontSize:12, color:"var(--primary)", fontWeight:700, display: "flex", alignItems: "center", gap: 4 }}>
+                          <span style={{ fontSize:12, color:"var(--primary)", fontWeight:700, display:"flex", alignItems:"center", gap:4 }}>
                             Evidence <ArrowRight size={14} />
                           </span>
                         </div>
@@ -560,9 +697,9 @@ export default function CasePage() {
 
             {/* Officer Signal Analysis */}
             {officerSigs && (
-              <Section title="Officer Signal Analysis" sub="Structured signals from qualitative field observations" stagger={4}
+              <Section title="Officer Signal Analysis" sub="Structured signals from qualitative field observations" stagger={5}
                 action={
-                  <div style={{ padding:"8px 18px", background:`${scoreColor(officerSigs.composite_score)}12`, border:`1px solid ${scoreColor(officerSigs.composite_score)}30`, borderRadius:"var(--r-md)", display: "flex", alignItems: "baseline" }}>
+                  <div style={{ padding:"8px 18px", background:`${scoreColor(officerSigs.composite_score)}12`, border:`1px solid ${scoreColor(officerSigs.composite_score)}30`, borderRadius:"var(--r-md)", display:"flex", alignItems:"baseline" }}>
                     <span style={{ fontFamily:"var(--font-mono)", fontSize:22, fontWeight:700, color:scoreColor(officerSigs.composite_score) }}>{officerSigs.composite_score}</span>
                     <span style={{ fontSize:12, color:"var(--text-3)", marginLeft:7 }}>composite</span>
                   </div>
@@ -577,7 +714,10 @@ export default function CasePage() {
                       <div key={dim} style={{ padding:"16px", background:"var(--glass)", border:"1px solid var(--line)", borderLeft:`3px solid ${c}`, borderRadius:"var(--r-lg)", boxShadow:"inset 0 1px 0 var(--glass-hi)" }}>
                         <p style={{ margin:"0 0 8px", fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:"0.09em", color:"var(--text-3)" }}>{dim.replace(/_/g," ")}</p>
                         <p style={{ margin:"0 0 8px", fontFamily:"var(--font-mono)", fontSize:28, fontWeight:700, color:c, lineHeight:1 }}>{sig.score}</p>
-                        {sig.explanations?.slice(0,2).map((e,i) => <p key={i} style={{ margin:"4px 0 0", fontSize:12, color:"var(--text-3)", lineHeight:1.5 }}>· {e}</p>)}
+                        {sig.explanations?.length > 0
+                          ? sig.explanations.slice(0,2).map((e,i) => <p key={i} style={{ margin:"4px 0 0", fontSize:12, color:"var(--text-3)", lineHeight:1.5 }}>· {e}</p>)
+                          : <p style={{ margin:"4px 0 0", fontSize:12, color:"var(--text-3)", lineHeight:1.5, fontStyle:"italic" }}>No signals detected</p>
+                        }
                       </div>
                     );
                   })}
@@ -587,7 +727,7 @@ export default function CasePage() {
 
             {/* Live: Docs + Notes */}
             {!sampleData && (
-              <div data-animate style={{ "--stagger": 5, display:"grid", gridTemplateColumns:"1fr 1fr", gap:20 } as React.CSSProperties}>
+              <div data-animate style={{ "--stagger": 6, display:"grid", gridTemplateColumns:"1fr 1fr", gap:20 } as React.CSSProperties}>
                 <FileUpload uploadedFiles={cc.uploaded_files??[]} onUpload={onUpload} loading={uploadState.loading} error={uploadState.error} success={uploadState.success} />
                 <OfficerNotes initialValue={cc.officer_notes??""} onSave={onSaveNotes} loading={notesState.loading} error={notesState.error} success={notesState.success} />
               </div>
@@ -595,14 +735,14 @@ export default function CasePage() {
 
             {/* Sample: Docs */}
             {sampleData && (cc.uploaded_files??[]).length > 0 && (
-              <Section title={`Uploaded Documents (${cc.uploaded_files!.length})`} stagger={5}>
+              <Section title={`Uploaded Documents (${cc.uploaded_files!.length})`} stagger={7}>
                 <div className="table-wrap">
                   <table className="data-table">
                     <thead><tr><th>File Name</th><th>Type</th><th>Date</th></tr></thead>
                     <tbody>
                       {cc.uploaded_files!.map(f => (
                         <tr key={f.file_name}>
-                          <td style={{ fontWeight:600, color:"var(--text)", display: "flex", alignItems: "center", gap: 6 }}>
+                          <td style={{ fontWeight:600, color:"var(--text)", display:"flex", alignItems:"center", gap:6 }}>
                             <File size={16} className="text-muted" /> {f.file_name}
                           </td>
                           <td style={{ fontSize:13 }}>{f.doc_type||"—"}</td>
@@ -617,7 +757,7 @@ export default function CasePage() {
 
             {/* Sample: Officer Notes */}
             {sampleData && cc.officer_notes && (
-              <Section title="Officer Notes" stagger={6}>
+              <Section title="Officer Notes" stagger={8}>
                 <p style={{ margin:0, padding:"16px 20px", background:"var(--glass)", border:"1px solid var(--line)", borderLeft:"3px solid var(--primary)", borderRadius:"var(--r-lg)", fontSize:14, color:"var(--text-2)", lineHeight:1.8, whiteSpace:"pre-wrap", boxShadow:"inset 0 1px 0 var(--glass-hi)" }}>
                   {cc.officer_notes}
                 </p>

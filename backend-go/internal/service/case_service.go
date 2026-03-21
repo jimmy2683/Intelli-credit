@@ -1,8 +1,10 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"mime/multipart"
 	"os"
@@ -20,13 +22,15 @@ var ErrCaseNotFound = errors.New("case not found")
 type CaseService struct {
 	cfg      config.Config
 	aiClient *client.AIClient
+	s3Client *client.S3Client
 	db       *store.DB
 }
 
-func NewCaseService(cfg config.Config, aiClient *client.AIClient, db *store.DB) *CaseService {
+func NewCaseService(cfg config.Config, aiClient *client.AIClient, s3Client *client.S3Client, db *store.DB) *CaseService {
 	return &CaseService{
 		cfg:      cfg,
 		aiClient: aiClient,
+		s3Client: s3Client,
 		db:       db,
 	}
 }
@@ -112,36 +116,53 @@ func (s *CaseService) SaveUploadedFiles(id string, files []*multipart.FileHeader
 		return nil, err
 	}
 
-	baseDir := filepath.Join(s.cfg.DataRoot, "uploads", id)
-	if err := os.MkdirAll(baseDir, 0o755); err != nil {
-		return nil, fmt.Errorf("create upload dir: %w", err)
-	}
-
 	saved := make([]model.UploadedFile, 0, len(files))
 	for _, fh := range files {
 		src, err := fh.Open()
 		if err != nil {
 			return nil, fmt.Errorf("open file %s: %w", fh.Filename, err)
 		}
+		defer src.Close()
 
-		dstPath := filepath.Join(baseDir, fmt.Sprintf("%d_%s", time.Now().UnixNano(), fh.Filename))
-		dst, err := os.Create(dstPath)
-		if err != nil {
-			src.Close()
-			return nil, fmt.Errorf("create dst file %s: %w", dstPath, err)
-		}
+		var finalPath string
+		if s.s3Client != nil {
+			// Upload to S3
+			ext := filepath.Ext(fh.Filename)
+			key := fmt.Sprintf("uploads/%s/%d_%s", id, time.Now().UnixNano(), fh.Filename)
+			
+			contentType := "application/octet-stream"
+			if ext == ".pdf" {
+				contentType = "application/pdf"
+			}
+			
+			uri, err := s.s3Client.UploadFile(context.Background(), key, src, contentType)
+			if err != nil {
+				return nil, fmt.Errorf("s3 upload %s: %w", fh.Filename, err)
+			}
+			finalPath = uri
+		} else {
+			// Fallback to local storage
+			baseDir := filepath.Join(s.cfg.DataRoot, "uploads", id)
+			if err := os.MkdirAll(baseDir, 0o755); err != nil {
+				return nil, fmt.Errorf("create upload dir: %w", err)
+			}
 
-		if _, err := dst.ReadFrom(src); err != nil {
-			src.Close()
-			dst.Close()
-			return nil, fmt.Errorf("copy uploaded file %s: %w", fh.Filename, err)
+			dstPath := filepath.Join(baseDir, fmt.Sprintf("%d_%s", time.Now().UnixNano(), fh.Filename))
+			dst, err := os.Create(dstPath)
+			if err != nil {
+				return nil, fmt.Errorf("create dst file %s: %w", dstPath, err)
+			}
+			defer dst.Close()
+
+			if _, err := io.Copy(dst, src); err != nil {
+				return nil, fmt.Errorf("copy uploaded file %s: %w", fh.Filename, err)
+			}
+			finalPath = dstPath
 		}
-		src.Close()
-		dst.Close()
 
 		saved = append(saved, model.UploadedFile{
 			FileName:   fh.Filename,
-			FilePath:   dstPath,
+			FilePath:   finalPath,
 			UploadedAt: time.Now().UTC().Format(time.RFC3339),
 		})
 	}

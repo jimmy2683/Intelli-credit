@@ -8,6 +8,7 @@ import os
 import re
 from pathlib import Path
 from typing import Any
+from .s3_service import download_from_s3
 
 logger = logging.getLogger(__name__)
 
@@ -173,13 +174,19 @@ def parse_documents(
     errors: list[str] = []
 
     for i, meta in enumerate(file_metadata):
-        file_path = meta.get("file_path") or meta.get("file_name")
-        file_name = meta.get("file_name", str(file_path))
-        doc_type = meta.get("doc_type") or infer_doc_type(file_name, str(file_path or ""))
+        file_path_raw = meta.get("file_path") or meta.get("file_name")
+        file_name = meta.get("file_name", str(file_path_raw))
+        doc_type = meta.get("doc_type") or infer_doc_type(file_name, str(file_path_raw or ""))
 
-        path = resolve_path(str(file_path) if file_path else None, case_id)
+        path: Path | None = None
+        if file_path_raw and str(file_path_raw).startswith("s3://"):
+            local_path_str = download_from_s3(str(file_path_raw))
+            path = Path(local_path_str)
+        else:
+            path = resolve_path(str(file_path_raw) if file_path_raw else None, case_id)
+
         if not path or not path.exists():
-            errors.append(f"File not found: {file_name} ({file_path})")
+            errors.append(f"File not found: {file_name} ({file_path_raw})")
             continue
 
         text, used_ocr = extract_text_from_file(path)
