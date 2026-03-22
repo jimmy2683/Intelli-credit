@@ -6,7 +6,10 @@ from pydantic import BaseModel, Field
 class UploadedFileMetadata(BaseModel):
     file_name: str
     file_path: Optional[str] = None
-    doc_type: Optional[str] = None
+    doc_type: Optional[str] = None  # Legacy or final confirmed type
+    predicted_type: Optional[str] = None
+    classification_confidence: Optional[float] = None
+    user_confirmed_type: Optional[str] = None
     uploaded_at: Optional[str] = None
 
 
@@ -22,6 +25,9 @@ class PipelineInput(BaseModel):
     uploaded_file_metadata: List[UploadedFileMetadata] = Field(default_factory=list)
     document_references: Optional[List[Dict[str, Any]]] = None
     parsed_text_chunks: List[Dict[str, Any]] = Field(default_factory=list)
+    extraction_schema: Optional[Dict[str, Any]] = None
+    schema_version: Optional[str] = None
+    declared_company_name: Optional[str] = None
     officer_notes: Optional[str] = None
     company_details: Optional[CompanyDetails] = None
     web_search_context: Optional[Dict[str, Any]] = None
@@ -33,7 +39,9 @@ class PipelineInput(BaseModel):
 
 class ExtractResponse(BaseModel):
     extracted_facts: Dict[str, Any]
-    parsed_text_chunks: List[Dict[str, Any]]
+    parsed_text_chunks: Optional[List[Dict[str, Any]]] = Field(default_factory=list)
+    classification_results: Optional[List[Dict[str, Any]]] = None
+    risk_flags: Optional[List[Dict[str, Any]]] = Field(default_factory=list)
     source: str = "mock"
 
 
@@ -74,6 +82,8 @@ class ScoreResponse(BaseModel):
     reasons: Optional[List[str]] = None
     hard_override_applied: Optional[bool] = None
     hard_override_reason: Optional[str] = None
+    requires_human_review: Optional[bool] = False
+    review_reason: Optional[str] = None
     officer_note_signals: Optional[Dict[str, Any]] = None
     source: str = "mock"
 
@@ -87,5 +97,7 @@ class CamResponse(BaseModel):
     evidence_summary: str
     cam_doc_path: str
     generated_at: str
+    requires_human_review: Optional[bool] = False
+    review_reason: Optional[str] = None
     source: str = "mock"
 

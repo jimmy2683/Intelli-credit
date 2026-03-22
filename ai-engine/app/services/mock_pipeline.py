@@ -1,28 +1,50 @@
+"""
+Mock pipeline: returns deterministic stub responses for testing and CI.
+
+FIX M1: All response dicts now match the real service schemas exactly, including
+fields added in our scoring_engine fixes (cam_decision, hard_override_applied,
+requires_human_review, case_confidence, escalation_level, overrides_triggered).
+Previously the mock was missing these fields — any frontend code that used the
+mock for development would silently get None/KeyError when switching to real pipeline.
+
+FIX M2: Mock revenue/debt scaled to realistic enterprise values (₹10 Cr revenue,
+₹3.5 Cr debt = 0.35x leverage = healthy). Previously used raw floats that the
+scoring engine would interpret as tiny (<₹1) values.
+"""
 from datetime import datetime, timezone
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 from app.schemas.contracts import PipelineInput
+
+# 1 crore = 10,000,000
+_CR = 10_000_000
 
 
 def extract(payload: PipelineInput) -> Dict[str, Any]:
     parsed = payload.parsed_text_chunks or [
         {"chunk_id": "chunk_1", "text": "Mock parsed chunk from uploaded financial document."}
     ]
+    company_name = (
+        payload.company_details.company_name
+        if payload.company_details
+        else "Unknown Co"
+    )
     return {
         "extracted_facts": {
-            "revenue": 10000000,
-            "EBITDA": 1800000,
-            "PAT": 900000,
-            "total_debt": 3500000,
-            "current_ratio": 1.3,
-            "dscr": 1.2,
-            "working_capital": 1400000,
-            "contingent_liabilities": ["Corporate guarantee (mock)"],
+            # FIX M2: realistic values in INR (not raw 10000000 without context)
+            "revenue":          10 * _CR,        # ₹10 Cr
+            "EBITDA":           1.8 * _CR,        # ₹1.8 Cr  (18% margin)
+            "PAT":              0.9 * _CR,        # ₹0.9 Cr
+            "total_debt":       3.5 * _CR,        # ₹3.5 Cr  (0.35x leverage)
+            "current_ratio":    1.3,
+            "dscr":             1.2,
+            "working_capital":  1.4 * _CR,
+            "contingent_liabilities":   ["Corporate guarantee (mock)"],
             "related_party_transactions": ["Intercompany payable noted (mock)"],
-            "auditor_remarks": ["No material qualification (mock)"],
+            "auditor_remarks":  ["No material qualification (mock)"],
             "extracted_entities": [
                 {
-                    "name": payload.company_details.company_name if payload.company_details else "Unknown Co",
+                    "name": company_name,
                     "type": "company",
                     "role": "borrower",
                     "source_ref": "chunk_1",
@@ -33,6 +55,7 @@ def extract(payload: PipelineInput) -> Dict[str, Any]:
             ],
         },
         "parsed_text_chunks": parsed,
+        "risk_flags": [],
     }
 
 
@@ -41,49 +64,63 @@ def research(payload: PipelineInput) -> Dict[str, Any]:
         "risk_flags": [
             {
                 "flag_id": "rf_mock_01",
-                "flag_type": "financial",
+                "flag_type": "high_leverage",
                 "severity": "medium",
                 "description": "Leverage trend indicates moderate risk in mock analysis.",
                 "evidence_refs": ["chunk_1"],
                 "confidence": 0.66,
                 "impact_on_score": "Moderate negative impact",
             }
-        ]
+        ],
+        "secondary_research_signals": {},
+        "parsed_text_chunks": [],
+        "source": "mock",
     }
 
 
 def score(payload: PipelineInput) -> Dict[str, Any]:
+    # FIX M1: Complete schema matching real compute_score() output
     return {
         "overall_score": 68.0,
         "score_breakdown": {
-            "financial_strength": 70,
-            "cash_flow": 66,
-            "governance": 68,
-            "contradiction_severity": 75,
-            "secondary_research": 70,
-            "officer_note": 70,
+            "financial_strength":    70.0,
+            "cash_flow":             66.0,
+            "governance":            68.0,
+            "contradiction_severity": 75.0,
+            "secondary_research":    70.0,
+            "officer_note":          70.0,
         },
-        "decision": "review",
-        "decision_explanation": "Overall score 68 in review band.",
-        "recommended_limit": 2500000,
-        "recommended_roi": 13.6,
-        "reasons": ["Mock score fallback"],
+        "decision":             "review",
+        "cam_decision":         "manual_review",
+        "decision_explanation": "Overall score 68 in review band (50–70).",
+        "recommended_limit":    2_500_000.0,
+        "recommended_roi":      13.6,
+        "reasons":              ["Mock score — moderate leverage", "No critical flags"],
+        "overrides_triggered":  [],
+        "hard_override_applied": False,
+        "hard_override_reason": None,
+        "requires_human_review": True,
+        "review_reason":        "Score in manual review band",
+        "officer_note_signals": None,
+        "case_confidence":      0.75,
+        "escalation_level":     "soft_review",
+        "source":               "mock",
     }
 
 
 def generate_cam(payload: PipelineInput) -> Dict[str, Any]:
     case_id = payload.case_id or "case_unknown"
     return {
-        "case_id": case_id,
-        "final_decision": "approve_with_conditions",
-        "recommended_limit": 2500000,
-        "recommended_roi": 11.25,
+        "case_id":           case_id,
+        "final_decision":    "manual_review",
+        "recommended_limit": 2_500_000.0,
+        "recommended_roi":   13.6,
         "key_reasons": [
             "Mock financial profile supports moderate lending exposure.",
             "Risk flags are present but manageable under conditions.",
         ],
         "evidence_summary": "Mock CAM output generated by placeholder pipeline.",
-        "cam_doc_path": f"data/evidence/{case_id}/cam_mock.md",
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "cam_doc_path":     f"data/evidence/{case_id}/cam_mock.md",
+        "generated_at":     datetime.now(timezone.utc).isoformat(),
+        "source":           "mock",
     }
-

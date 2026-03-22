@@ -47,7 +47,7 @@ func main() {
 	}
 
 	// log.Println("AI BASE URL:", cfg.AIEngineBaseURL)
-	aiClient := client.NewAIClient(cfg.AIEngineBaseURL, cfg.HTTPTimeout)
+	aiClient := client.NewAIClient(cfg.AIEngineBaseURL, cfg.HTTPTimeout, 2)
 	caseService := service.NewCaseService(cfg, aiClient, s3Client, db)
 	caseController := controller.NewCaseController(caseService)
 

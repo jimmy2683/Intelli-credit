@@ -77,6 +77,7 @@ def detect_contradictions(
             "impact_on_score": impact,
         })
 
+    # --- GST vs Bank mismatch ---
     if any("mismatch" in str(b).lower() or "reconcil" in str(b).lower() for b in bank_gst):
         add_flag(
             "gst_bank_mismatch",
@@ -86,6 +87,7 @@ def detect_contradictions(
             "Significant negative impact; may indicate revenue quality concerns.",
         )
 
+    # --- Revenue vs DSCR contradiction ---
     if revenue and revenue > 0 and (dscr is not None and dscr < 1.0):
         add_flag(
             "weak_cash_conversion",
@@ -95,6 +97,7 @@ def detect_contradictions(
             "High impact on repayment capacity assessment.",
         )
 
+    # --- Debt vs sanction letter cross-check ---
     if debt and debt > 0 and "sanction_letter" in doc_types:
         add_flag(
             "debt_vs_sanction_check",
@@ -104,6 +107,7 @@ def detect_contradictions(
             "Moderate impact; verify debt consistency.",
         )
 
+    # --- Officer note cautionary signals ---
     if officer_notes:
         neg_terms = ["concern", "risk", "caution", "doubt", "weak", "unclear", "mismatch"]
         if any(t in note_lower for t in neg_terms):
@@ -115,6 +119,7 @@ def detect_contradictions(
                 "Moderate impact; warrants manual review.",
             )
 
+    # --- Litigation risk ---
     if legal and any("litigation" in str(l).lower() or "lawsuit" in str(l).lower() for l in legal):
         add_flag(
             "litigation_risk",
@@ -124,6 +129,9 @@ def detect_contradictions(
             "High impact on governance and contingent exposure.",
         )
 
+    # --- Auditor concern vs positive financials ---
+    # FIX: was broken — indentation error placed 0.9 and impact string outside add_flag(),
+    # making them dangling expressions instead of arguments.
     auditor_neg = ["qualification", "adverse", "disclaimer", "uncertainty", "emphasis"]
     if auditor and any(any(n in str(a).lower() for n in auditor_neg) for a in auditor):
         if (pat is not None and pat > 0) or (revenue and revenue > 0):
@@ -131,10 +139,11 @@ def detect_contradictions(
                 "auditor_concern",
                 "high",
                 "Auditor remarks suggest qualification or emphasis vs positive financials.",
-            0.9,
-            "High impact; auditor concern flags governance and reporting quality.",
+                0.9,
+                "High impact; auditor concern flags governance and reporting quality.",
             )
 
+    # --- High related-party exposure ---
     if len(rpt) >= 3:
         add_flag(
             "high_related_party_dependency",
@@ -144,6 +153,7 @@ def detect_contradictions(
             "Moderate impact on governance and transparency.",
         )
 
+    # --- Low current ratio ---
     if current_ratio is not None and current_ratio < 1.0:
         add_flag(
             "low_liquidity",
@@ -153,6 +163,7 @@ def detect_contradictions(
             "Moderate negative impact on short-term solvency.",
         )
 
+    # --- Negative working capital ---
     if wc is not None and wc < 0:
         add_flag(
             "negative_working_capital",

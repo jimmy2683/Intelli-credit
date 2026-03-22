@@ -24,15 +24,22 @@ type AIClient struct {
 	baseURL string
 	http    *http.Client
 	timeout time.Duration
+
+	sem chan struct{} // concurrency limiter
 }
 
-func NewAIClient(baseURL string, timeout time.Duration) *AIClient {
+func NewAIClient(baseURL string, timeout time.Duration, maxConcurrent int) *AIClient {
+	if maxConcurrent <= 0 {
+		maxConcurrent = 1 // safe fallback
+	}
+
 	return &AIClient{
 		baseURL: strings.TrimRight(baseURL, "/"),
 		http: &http.Client{
 			Timeout: timeout,
 		},
 		timeout: timeout,
+		sem:     make(chan struct{}, maxConcurrent),
 	}
 }
 
@@ -57,6 +64,10 @@ func (c *AIClient) Notes(payload any) (map[string]any, error) {
 }
 
 func (c *AIClient) postWithRetry(path string, payload any) (map[string]any, error) {
+	// Acquire semaphore (blocks if limit reached)
+	c.sem <- struct{}{}
+	defer func() { <-c.sem }() // Release after execution
+
 	var lastErr error
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		if attempt > 0 {
@@ -74,7 +85,6 @@ func (c *AIClient) postWithRetry(path string, payload any) (map[string]any, erro
 		}
 		lastErr = err
 
-		// Only retry on connection/timeout errors, not on 4xx (client errors)
 		if !isRetryable(err) {
 			return nil, fmt.Errorf("non-retryable error on %s: %w", path, err)
 		}
@@ -86,15 +96,23 @@ func isRetryable(err error) bool {
 	if err == nil {
 		return false
 	}
+
 	errStr := err.Error()
-	// Connection refused, timeout, and 5xx errors are retryable
+
+	// Retry on 429 explicitly (rate limit)
+	if strings.Contains(errStr, "429") {
+		return true
+	}
+
+	// Retry on connection + timeout + 5xx
 	if strings.Contains(errStr, "connection refused") ||
 		strings.Contains(errStr, "context deadline exceeded") ||
 		strings.Contains(errStr, "timeout") ||
 		strings.Contains(errStr, "status 5") {
 		return true
 	}
-	return true // Default: retry on unknown errors
+
+	return false
 }
 
 func (c *AIClient) post(path string, payload any) (map[string]any, error) {
@@ -128,7 +146,6 @@ func (c *AIClient) post(path string, payload any) (map[string]any, error) {
 	}
 	return out, nil
 }
-
 
 func (c *AIClient) Ping() error {
 	url := c.baseURL + "/ping"

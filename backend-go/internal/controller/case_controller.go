@@ -69,14 +69,36 @@ func (c *CaseController) HandleCaseRoutes(w http.ResponseWriter, r *http.Request
 	case r.Method == http.MethodPost && action == "notes":
 		c.updateNotes(w, r, id)
 	case r.Method == http.MethodPost && action == "analyze":
-		c.analyzeCase(w, id)
+		c.analyzeCase(w, r, id)
 	case r.Method == http.MethodGet && action == "cam" && subAction == "":
 		c.getCAM(w, id)
 	case r.Method == http.MethodGet && action == "cam" && subAction == "download":
 		c.downloadCAM(w, r, id)
+	case r.Method == http.MethodPost && action == "schema":
+		c.updateSchema(w, r, id)
+	case r.Method == http.MethodPost && action == "classification" && subAction == "confirm":
+		c.confirmClassification(w, r, id)
 	default:
 		utils.WriteError(w, http.StatusMethodNotAllowed, "method not allowed")
 	}
+}
+
+func (c *CaseController) updateSchema(w http.ResponseWriter, r *http.Request, id string) {
+	var req map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		utils.WriteError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	out, err := c.caseService.UpdateSchema(r.Context(), id, req)
+	if err != nil {
+		if errors.Is(err, service.ErrCaseNotFound) {
+			utils.WriteError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		utils.WriteError(w, http.StatusInternalServerError, "failed to update schema")
+		return
+	}
+	utils.WriteJSON(w, http.StatusOK, out)
 }
 
 func (c *CaseController) getCase(w http.ResponseWriter, id string) {
@@ -121,8 +143,13 @@ func (c *CaseController) uploadFiles(w http.ResponseWriter, r *http.Request, id 
 	})
 }
 
-func (c *CaseController) analyzeCase(w http.ResponseWriter, id string) {
-	out, err := c.caseService.AnalyzeCase(id)
+func (c *CaseController) analyzeCase(w http.ResponseWriter, r *http.Request, id string) {
+	var req struct {
+		FileNames []string `json:"file_names"`
+	}
+	json.NewDecoder(r.Body).Decode(&req) // Ignore body if empty
+
+	out, err := c.caseService.AnalyzeCase(id, req.FileNames)
 	if err != nil {
 		if errors.Is(err, service.ErrCaseNotFound) {
 			utils.WriteError(w, http.StatusNotFound, err.Error())
@@ -185,6 +212,29 @@ func (c *CaseController) updateNotes(w http.ResponseWriter, r *http.Request, id 
 			return
 		}
 		utils.WriteError(w, http.StatusInternalServerError, "failed to update notes")
+		return
+	}
+	utils.WriteJSON(w, http.StatusOK, out)
+}
+
+func (c *CaseController) confirmClassification(w http.ResponseWriter, r *http.Request, id string) {
+	var req struct {
+		FileName      string `json:"file_name"`
+		ConfirmedType string `json:"confirmed_type"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		utils.WriteError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+
+	out, err := c.caseService.ConfirmClassification(id, req.FileName, req.ConfirmedType)
+	if err != nil {
+		if errors.Is(err, service.ErrCaseNotFound) {
+			utils.WriteError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		log.Printf("confirm classification error: %v", err)
+		utils.WriteError(w, http.StatusInternalServerError, "failed to confirm type")
 		return
 	}
 	utils.WriteJSON(w, http.StatusOK, out)

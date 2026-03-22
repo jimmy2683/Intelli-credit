@@ -18,13 +18,16 @@ class NoteExtractor(ABC):
 
 
 # ---------------------------------------------------------------------------
-# Pattern definitions for keyword-based extraction
+# Pattern definitions
+# FIX O1: Replaced greedy `.*` in multi-word patterns with bounded `[^.]{0,50}`
+#         to prevent catastrophic backtracking on long notes and false positives
+#         (e.g. "site visit was great ... no concern" matching "site.*concern").
 # ---------------------------------------------------------------------------
 
 CAPACITY_PATTERNS = {
     "negative": [
-        (r"(\d{1,3})\s*%\s*capacity", "capacity_pct"),      # "40% capacity"
-        (r"operating at (\d{1,3})\s*%", "capacity_pct"),     # "operating at 40%"
+        (r"(\d{1,3})\s*%\s*capacity", "capacity_pct"),
+        (r"operating at (\d{1,3})\s*%", "capacity_pct"),
         (r"under-?utiliz", None),
         (r"idle\s+(plant|machinery|capacity)", None),
         (r"shut\s*down", None),
@@ -44,9 +47,9 @@ MANAGEMENT_PATTERNS = {
         (r"uncooperative", None),
         (r"non[\s-]?responsive", None),
         (r"misleading", None),
-        (r"reluctant", None),
+        (r"reluctant\s+to\s+share", None),    # FIX O1: was just "reluctant" — too broad
         (r"hostile", None),
-        (r"defensive", None),
+        (r"defensive\s+about", None),          # FIX O1: was "defensive" — too broad
         (r"not\s+transparent", None),
         (r"hiding\s+information", None),
     ],
@@ -101,7 +104,9 @@ COLLECTION_PATTERNS = {
 
 SITE_VISIT_PATTERNS = {
     "negative": [
-        (r"site\s+.*\s*concern", None),
+        # FIX O1: was `r"site\s+.*\s*concern"` — `.*` could cross sentence boundaries.
+        # Now bounded to 50 chars between "site" and "concern".
+        (r"site\s+[^.]{0,50}concern", None),
         (r"discrepanc", None),
         (r"mismatch\s+(between|in|on)\s+site", None),
         (r"inventory\s+(mismatch|concern|low|missing)", None),
@@ -117,22 +122,34 @@ SITE_VISIT_PATTERNS = {
 
 PROMOTER_PATTERNS = {
     "negative": [
-        (r"promoter\s+(response\s+)?(was\s+)?evasive", None),
-        (r"promoter\s+.*\s*doubt", None),
-        (r"promoter\s+.*\s*concern", None),
-        (r"promoter\s+lifestyle\s+.*\s*(extravagant|lavish)", None),
-        (r"promoter\s+.*\s*(legal|litigation|case)", None),
-        (r"diversion\s+of\s+fund", None),
+        # FIX O1: Replaced `.*` with `[^.]{0,40}` throughout to bound matching
+        (r"promoter\s+[^.]{0,30}(was\s+)?evasive", None),
+        (r"promoter\s+[^.]{0,40}doubt", None),
+        (r"promoter\s+[^.]{0,40}concern", None),
+        (r"promoter\s+lifestyle\s+[^.]{0,30}(extravagant|lavish)", None),
+        (r"promoter\s+[^.]{0,40}(legal|litigation|case)", None),
+        (r"diversion\s+of\s+funds?", None),
         (r"fund\s+diversion", None),
-        (r"promoter\s+.*\s*not\s+credible", None),
+        (r"promoter\s+[^.]{0,30}not\s+credible", None),
     ],
     "positive": [
-        (r"promoter\s+.*\s*(credible|experienced|reputed)", None),
+        (r"promoter\s+[^.]{0,30}(credible|experienced|reputed)", None),
         (r"strong\s+promoter", None),
         (r"promoter\s+track\s+record\s+(good|strong)", None),
-        (r"promoter\s+.*\s*cooperative", None),
+        (r"promoter\s+[^.]{0,20}cooperative", None),
     ],
 }
+
+# FIX O2: Composite weights must sum to 1.0 — verified with assertion.
+_COMPOSITE_WEIGHTS = {
+    "capacity_utilization": 0.20,
+    "management_quality":   0.20,
+    "operational_health":   0.15,
+    "collection_risk":      0.15,
+    "site_visit_risk":      0.15,
+    "promoter_behavior_score": 0.15,
+}
+assert abs(sum(_COMPOSITE_WEIGHTS.values()) - 1.0) < 1e-9, "Composite weights must sum to 1.0"
 
 
 def _score_dimension(
@@ -142,7 +159,7 @@ def _score_dimension(
     neg_weight: float = 12.0,
     pos_weight: float = 8.0,
 ) -> tuple[float, list[str]]:
-    """Score a dimension from 0-100 using pattern matching.  Returns (score, explanations)."""
+    """Score a dimension 0–100 using pattern matching. Returns (score, explanations)."""
     score = base
     explanations: list[str] = []
 
@@ -155,12 +172,16 @@ def _score_dimension(
                     pct = int(m.group(1))
                     if pct < 50:
                         score -= 10
-                        explanations.append(f"Low capacity utilization (~{pct}%)")
+                        explanations.append(f"Very low capacity utilization (~{pct}%)")
                     elif pct < 70:
                         score -= 5
                         explanations.append(f"Below-average capacity utilization (~{pct}%)")
+                    else:
+                        # FIX O3: Previously no explanation was added for pct >= 70
+                        # even though neg_weight was already deducted. Add one.
+                        explanations.append(f"Capacity utilization noted (~{pct}%)")
                 except (IndexError, ValueError):
-                    pass
+                    explanations.append(f"Capacity utilization concern: '{m.group(0).strip()}'")
             else:
                 explanations.append(f"Negative signal: '{m.group(0).strip()}'")
 
@@ -182,43 +203,52 @@ class KeywordNoteExtractor(NoteExtractor):
 
         text = notes.strip()
 
-        cap_score, cap_reasons = _score_dimension(text, CAPACITY_PATTERNS, neg_weight=15.0)
+        cap_score,  cap_reasons  = _score_dimension(text, CAPACITY_PATTERNS,  neg_weight=15.0)
         mgmt_score, mgmt_reasons = _score_dimension(text, MANAGEMENT_PATTERNS)
-        ops_score, ops_reasons = _score_dimension(text, OPERATIONAL_PATTERNS)
+        ops_score,  ops_reasons  = _score_dimension(text, OPERATIONAL_PATTERNS)
         coll_score, coll_reasons = _score_dimension(text, COLLECTION_PATTERNS)
         site_score, site_reasons = _score_dimension(text, SITE_VISIT_PATTERNS)
         prom_score, prom_reasons = _score_dimension(text, PROMOTER_PATTERNS, neg_weight=14.0)
 
-        composite = (
-            0.20 * cap_score
-            + 0.20 * mgmt_score
-            + 0.15 * ops_score
-            + 0.15 * coll_score
-            + 0.15 * site_score
-            + 0.15 * prom_score
-        )
+        scores = {
+            "capacity_utilization":    cap_score,
+            "management_quality":      mgmt_score,
+            "operational_health":      ops_score,
+            "collection_risk":         coll_score,
+            "site_visit_risk":         site_score,
+            "promoter_behavior_score": prom_score,
+        }
+        composite = sum(_COMPOSITE_WEIGHTS[k] * v for k, v in scores.items())
+
+        reasons_map = {
+            "capacity_utilization":    cap_reasons,
+            "management_quality":      mgmt_reasons,
+            "operational_health":      ops_reasons,
+            "collection_risk":         coll_reasons,
+            "site_visit_risk":         site_reasons,
+            "promoter_behavior_score": prom_reasons,
+        }
 
         return {
-            "capacity_utilization": {"score": round(cap_score, 1), "explanations": cap_reasons},
-            "management_quality": {"score": round(mgmt_score, 1), "explanations": mgmt_reasons},
-            "operational_health": {"score": round(ops_score, 1), "explanations": ops_reasons},
-            "collection_risk": {"score": round(coll_score, 1), "explanations": coll_reasons},
-            "site_visit_risk": {"score": round(site_score, 1), "explanations": site_reasons},
-            "promoter_behavior_score": {"score": round(prom_score, 1), "explanations": prom_reasons},
+            **{
+                dim: {"score": round(scores[dim], 1), "explanations": reasons_map[dim]}
+                for dim in scores
+            },
             "composite_score": round(composite, 1),
-            "all_explanations": cap_reasons + mgmt_reasons + ops_reasons + coll_reasons + site_reasons + prom_reasons,
+            "all_explanations": (
+                cap_reasons + mgmt_reasons + ops_reasons
+                + coll_reasons + site_reasons + prom_reasons
+            ),
         }
 
 
 def _empty_signals() -> dict[str, Any]:
     """Neutral default when no officer notes provided."""
-    dims = [
-        "capacity_utilization", "management_quality", "operational_health",
-        "collection_risk", "site_visit_risk", "promoter_behavior_score",
-    ]
-    out: dict[str, Any] = {}
-    for d in dims:
-        out[d] = {"score": 70.0, "explanations": ["No officer notes provided; neutral default"]}
+    dims = list(_COMPOSITE_WEIGHTS.keys())
+    out: dict[str, Any] = {
+        d: {"score": 70.0, "explanations": ["No officer notes provided; neutral default"]}
+        for d in dims
+    }
     out["composite_score"] = 70.0
     out["all_explanations"] = ["No officer notes provided"]
     return out

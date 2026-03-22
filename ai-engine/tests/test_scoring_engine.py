@@ -167,7 +167,7 @@ class TestComputeScore:
             officer_notes="Factory at full capacity. Management cooperative.",
         )
         assert result["overall_score"] >= THRESHOLD_APPROVE
-        assert result["decision"] == "approve"
+        assert result["decision"] == "APPROVE"
         assert result["recommended_limit"] > 0
         assert result["recommended_roi"] > 0
 
@@ -186,7 +186,7 @@ class TestComputeScore:
             officer_notes="Factory at 30% capacity. Promoter evasive. Stock mismatch observed.",
         )
         assert result["overall_score"] < THRESHOLD_REVIEW
-        assert result["decision"] in ("reject", "decline")
+        assert result["decision"] in ("REJECT", "DECLINE")
 
     def test_score_breakdown_keys(self):
         result = compute_score(
@@ -208,7 +208,7 @@ class TestComputeScore:
             officer_notes="",
         )
         if result.get("hard_override_applied"):
-            assert result["decision"] in ("reject", "decline")
+            assert result["decision"] in ("REJECT", "DECLINE")
             assert result["hard_override_reason"]
 
     def test_required_output_fields(self):
@@ -219,3 +219,50 @@ class TestComputeScore:
     def test_score_is_bounded(self):
         result = compute_score(_make_facts(), _make_flags("critical", "critical", "critical", "high", "high"), None, None)
         assert 0 <= result["overall_score"] <= 100
+
+
+# ── User Requested Scenarios ──
+
+class TestUserScenarios:
+    def test_healthy_case(self):
+        # 1. Healthy Case: dscr > 1.5, no risk flags -> EXPECT: APPROVE
+        result = compute_score(
+            extracted_facts=_make_facts(dscr=1.8, revenue=10000000, EBITDA=2500000, PAT=1500000, current_ratio=2.0),
+            risk_flags=[],
+            secondary_research=None,
+            officer_notes="Good company"
+        )
+        assert result["decision"] == "APPROVE"
+        
+    def test_risky_case(self):
+        # 2. Risky Case: dscr = 0.9, auditor concern -> EXPECT: REJECT
+        result = compute_score(
+            extracted_facts=_make_facts(dscr=0.9, auditor_remarks={"value": ["uncertainty regarding going concern"]}),
+            risk_flags=[{"flag_type": "auditor_concern", "severity": "critical"}],
+            secondary_research=None,
+            officer_notes="Poor performance"
+        )
+        assert result["decision"] == "REJECT"
+        assert "DSCR" in result["hard_override_reason"] or "Auditor" in result["hard_override_reason"]
+
+    def test_borderline_case(self):
+        # 3. Borderline Case: dscr = 1.1, 1 risk flag -> EXPECT: REVIEW
+        result = compute_score(
+            extracted_facts=_make_facts(dscr=1.1, revenue=10000000, EBITDA=2000000, PAT=500000, current_ratio=1.1),
+            risk_flags=[{"flag_type": "generic", "severity": "high"}],
+            secondary_research=None,
+            officer_notes="Average"
+        )
+        assert result["decision"] == "REVIEW"
+        assert "1 HIGH risk flag detected" in result.get("review_reason", "")
+
+    def test_mismatch_case(self):
+        # 4. Mismatch Case: wrong company file -> EXPECT: REJECT
+        result = compute_score(
+            extracted_facts=_make_facts(dscr=1.5),
+            risk_flags=[{"flag_type": "identity_mismatch", "severity": "critical", "confidence": 0.9}],
+            secondary_research=None,
+            officer_notes=""
+        )
+        assert result["decision"] == "REJECT"
+        assert "Company mismatch detected" in result["hard_override_reason"]

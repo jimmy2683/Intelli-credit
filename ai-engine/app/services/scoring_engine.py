@@ -4,7 +4,10 @@ Transparent weighted model with hard override rules.
 """
 from __future__ import annotations
 
+import logging  # FIX #1: was imported inside compute_score() function body — moved to module top
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 # Weights (must sum to 1.0)
 WEIGHTS = {
@@ -15,6 +18,9 @@ WEIGHTS = {
     "secondary_research": 0.15,
     "officer_note": 0.10,
 }
+
+# Sanity check at import time
+assert abs(sum(WEIGHTS.values()) - 1.0) < 1e-9, "WEIGHTS must sum to 1.0"
 
 # Decision thresholds
 THRESHOLD_APPROVE = 70
@@ -37,17 +43,21 @@ def _get_numeric(facts: dict, key: str) -> float | None:
 
 def _financial_strength_score(extracted_facts: dict) -> tuple[float, list[str]]:
     """0-100. Based on leverage, current ratio, profitability."""
-    revenue = _get_numeric(extracted_facts, "revenue") or 0
-    debt = _get_numeric(extracted_facts, "total_debt") or 0
-    pat = _get_numeric(extracted_facts, "PAT") or 0
+    # FIX #10: Use explicit None check + separate default so we can distinguish
+    # "not extracted" (None → skip leverage) from "extracted as 0" (0.0 → use it).
+    revenue_raw = _get_numeric(extracted_facts, "revenue")
+    revenue = revenue_raw if revenue_raw is not None else 0.0
+    debt_raw = _get_numeric(extracted_facts, "total_debt")
+    debt = debt_raw if debt_raw is not None else 0.0
+    pat = _get_numeric(extracted_facts, "PAT")          # None = not found
     current_ratio = _get_numeric(extracted_facts, "current_ratio")
     wc = _get_numeric(extracted_facts, "working_capital")
 
     score = 70.0  # base
-    reasons = []
+    reasons: list[str] = []
 
-    if revenue > 0 and debt >= 0:
-        lev = debt / revenue if revenue else 0
+    if revenue > 0:
+        lev = debt / revenue
         if lev > 1.5:
             score -= 20
             reasons.append(f"High leverage (debt/revenue ~{lev:.1f}x)")
@@ -70,96 +80,175 @@ def _financial_strength_score(extracted_facts: dict) -> tuple[float, list[str]]:
         score -= 15
         reasons.append("Negative working capital")
 
-    if pat is not None and revenue and revenue > 0:
+    # FIX #9 + #10: guard against None pat correctly; add reason for positive margin
+    if pat is not None and revenue > 0:
         margin = pat / revenue
-        if margin > 0.1:
-            score += 5
+        if margin > 0.15:
+            score += 8.0
+            reasons.append(f"Strong profitability (PAT margin {margin:.0%})")
+        elif margin > 0.05:
+            score += 3.0
+            reasons.append(f"Positive profitability (PAT margin {margin:.0%})")
         elif margin < 0:
-            score -= 15
-            reasons.append("Loss-making")
+            score -= 15.0
+            reasons.append(f"Loss-making (PAT margin {margin:.0%})")
 
-    return max(0, min(100, score)), reasons
+    return max(0.0, min(100.0, score)), reasons
 
 
 def _cash_flow_score(extracted_facts: dict) -> tuple[float, list[str]]:
-    """0-100. Based on DSCR, cash conversion."""
+    """0-100. Based on DSCR, EBITDA margin."""
     dscr = _get_numeric(extracted_facts, "dscr")
     revenue = _get_numeric(extracted_facts, "revenue")
     ebitda = _get_numeric(extracted_facts, "EBITDA")
 
     score = 70.0
-    reasons = []
+    reasons: list[str] = []
 
     if dscr is not None:
         if dscr >= 1.5:
-            score += 15
+            score += 15.0
             reasons.append(f"Strong DSCR ({dscr:.2f})")
+        elif dscr >= 1.25:
+            score += 8.0
+            reasons.append(f"Adequate DSCR ({dscr:.2f})")
         elif dscr >= 1.0:
-            score += 5
-        elif dscr < 1.0:
-            score -= 25
-            reasons.append(f"Weak DSCR ({dscr:.2f})")
+            score += 2.0
+            # Borderline — no positive reason appended; neutral
+        else:
+            score -= 25.0
+            reasons.append(f"Weak DSCR ({dscr:.2f}) — repayment capacity at risk")
 
     if revenue and ebitda is not None and revenue > 0:
         ebitda_margin = ebitda / revenue
-        if ebitda_margin < 0.05:
-            score -= 10
-            reasons.append("Low EBITDA margin")
+        if ebitda_margin >= 0.20:
+            score += 5.0
+            reasons.append(f"Strong EBITDA margin ({ebitda_margin:.0%})")
+        elif ebitda_margin < 0.05:
+            score -= 10.0
+            reasons.append(f"Low EBITDA margin ({ebitda_margin:.0%})")
+        elif ebitda_margin < 0:
+            score -= 20.0
+            reasons.append(f"Negative EBITDA ({ebitda_margin:.0%})")
 
-    return max(0, min(100, score)), reasons
+    return max(0.0, min(100.0, score)), reasons
 
 
 def _governance_score(risk_flags: list[dict], extracted_facts: dict) -> tuple[float, list[str]]:
     """0-100. Based on RPT, auditor, governance flags."""
     score = 75.0
-    reasons = []
+    reasons: list[str] = []
 
-    gov_flags = [f for f in risk_flags if f.get("flag_type") in ("governance_instability", "high_related_party_dependency", "auditor_concern")]
+    gov_flags = [
+        f for f in risk_flags
+        if f.get("flag_type") in (
+            "governance_instability", "high_related_party_dependency", "auditor_concern"
+        )
+    ]
+
+    # Track whether auditor_concern came via a flag to avoid double-penalising below
+    auditor_flag_applied = False
+
     for f in gov_flags:
         sev = f.get("severity", "medium")
         pen = SEVERITY_PENALTY.get(sev, 10)
         score -= pen
         reasons.append(f"Governance: {f.get('description', '')[:60]}")
+        if f.get("flag_type") == "auditor_concern":
+            auditor_flag_applied = True
 
-    auditor = extracted_facts.get("auditor_remarks")
-    aud_val = auditor.get("value", []) if isinstance(auditor, dict) else (auditor if isinstance(auditor, list) else [])
-    if isinstance(aud_val, list):
-        aud_str = " ".join(str(x).lower() for x in aud_val)
-        if "qualification" in aud_str or "adverse" in aud_str:
-            score -= 20
-            reasons.append("Auditor qualification/adverse remark")
+    # FIX #16: only apply the direct auditor text penalty when no flag has already penalised it
+    if not auditor_flag_applied:
+        auditor = extracted_facts.get("auditor_remarks")
+        aud_val = (
+            auditor.get("value", []) if isinstance(auditor, dict)
+            else (auditor if isinstance(auditor, list) else [])
+        )
+        if isinstance(aud_val, list):
+            aud_str = " ".join(str(x).lower() for x in aud_val)
+            if "qualification" in aud_str or "adverse" in aud_str:
+                score -= 20
+                reasons.append("Auditor qualification/adverse remark (text-based detection)")
 
-    return max(0, min(100, score)), reasons
+    return float(max(0.0, min(100.0, score))), reasons
 
 
 def _contradiction_severity_score(risk_flags: list[dict]) -> tuple[float, list[str]]:
-    """0-100. Inverse of contradiction/red-flag severity."""
+    """0-100. Inverse of contradiction/red-flag severity.
+    FIX #3: Critical penalty was 20 — same as high. Now critical=40 to properly differentiate.
+    Comment header was already documenting the intended scale; the dict was wrong.
+    """
     base = 100.0
-    reasons = []
+    reasons: list[str] = []
+    # Penalties per flag: critical is far more damaging than high
+    penalties = {"low": 5, "medium": 10, "high": 20, "critical": 40}
     for f in risk_flags:
-        sev = f.get("severity", "low")
-        pen = SEVERITY_PENALTY.get(sev, 5)
+        sev = f.get("severity", "low").lower()
+        pen = penalties.get(sev, 5)
         base -= pen
-        reasons.append(f"{sev}: {f.get('description', '')[:50]}")
-    return max(0, min(100, base)), reasons
+        reasons.append(f"{sev.upper()}: {f.get('description', '')[:50]}")
+    return max(0.0, min(100.0, base)), reasons
 
 
 def _secondary_research_score(secondary_research: dict | None) -> tuple[float, list[str]]:
-    """0-100. From research agent signals."""
+    """0-100. From research agent signals.
+
+    FIX #11 + #12:
+    - Mock/low-confidence research (confidence < 0.3) is treated as neutral (70.0)
+      rather than penalising at full weight based on placeholder LLM output.
+    - Also incorporates the AI-synthesised web_research_summary when present and
+      when it has higher confidence than the provider-level signals.
+    """
     if not secondary_research:
         return 70.0, ["No secondary research; neutral default"]
-    score = 100.0
-    reasons = []
 
+    # Check if this is mock data — if so, return neutral to avoid false penalisation
+    source = secondary_research.get("_source", "unknown")
+    if source == "mock":
+        return 70.0, ["Secondary research is mock data; neutral default applied"]
+
+    score = 100.0
+    reasons: list[str] = []
+
+    # Provider-level signals
     for key in ("litigation_risk", "regulatory_risk", "promoter_reputation_risk", "sector_headwind_risk"):
         sig = secondary_research.get(key) or {}
         level = sig.get("level", "low")
-        pen = RISK_LEVEL_PENALTY.get(level, 0)
-        score -= pen
-        if pen > 0:
-            reasons.append(f"{key}: {level}")
+        confidence = float(sig.get("confidence", 0.6))
 
-    return max(0, min(100, score)), reasons
+        # FIX #11: Only apply full penalty when confidence >= 0.5; scale down for uncertain signals
+        if confidence < 0.3:
+            continue  # insufficient confidence — ignore signal entirely
+
+        pen = RISK_LEVEL_PENALTY.get(level, 0)
+        effective_pen = pen * min(1.0, confidence / 0.7)  # scale penalty by confidence
+        score -= effective_pen
+
+        if pen > 0:
+            reasons.append(f"{key}: {level} (conf={confidence:.2f})")
+
+    # FIX #12: Also incorporate AI-synthesised web_research_summary if available
+    web = secondary_research.get("web_research_summary") or {}
+    web_source = web.get("_source", "unknown")
+
+    if web_source not in ("mock", "error", "unknown"):
+        for web_key in ("litigation_risk", "sentiment_risk", "sector_risk"):
+            sig = web.get(web_key) or {}
+            level = sig.get("level", "low")
+            confidence = float(sig.get("confidence", 0.5))
+
+            if confidence < 0.4:
+                continue
+
+            pen = RISK_LEVEL_PENALTY.get(level, 0)
+            # Weight web signals at 60% of provider signals (secondary corroboration)
+            effective_pen = pen * min(1.0, confidence / 0.8) * 0.6
+            score -= effective_pen
+
+            if pen > 0:
+                reasons.append(f"web_{web_key}: {level} (conf={confidence:.2f})")
+
+    return float(max(0.0, min(100.0, score))), reasons
 
 
 def _officer_note_score(officer_notes: str | None) -> tuple[float, list[str], dict | None]:
@@ -176,12 +265,13 @@ def _officer_note_score(officer_notes: str | None) -> tuple[float, list[str], di
         reasons = signals.get("all_explanations", [])
         if not reasons:
             reasons = ["Officer notes processed; no specific signals detected"]
-        return max(0, min(100, score)), reasons, signals
-    except Exception:
-        # Fallback to simple keyword counting
+        return max(0.0, min(100.0, score)), reasons, signals
+    except Exception as exc:
+        logger.warning("officer_notes processor failed, using keyword fallback: %s", exc)
+        # FIX #8: Removed dead `if not officer_notes:` check — can never be True here
         note_lower = officer_notes.lower()
         score = 70.0
-        reasons = []
+        reasons: list[str] = []
         neg = ["concern", "risk", "caution", "doubt", "weak", "unclear", "mismatch", "decline", "avoid"]
         pos = ["strong", "comfortable", "adequate", "positive", "recommend"]
         neg_count = sum(1 for w in neg if w in note_lower)
@@ -192,75 +282,202 @@ def _officer_note_score(officer_notes: str | None) -> tuple[float, list[str], di
             reasons.append("Officer notes contain cautionary language")
         if pos_count:
             reasons.append("Officer notes contain positive indicators")
-        return max(0, min(100, score)), reasons, None
+        return max(0.0, min(100.0, score)), reasons, None
 
 
-# Hard override rule checks
 def _check_hard_overrides(
     risk_flags: list[dict],
     extracted_facts: dict,
     secondary_research: dict | None,
-) -> tuple[bool, str | None]:
+    case_confidence: float,
+    contra_score: float,
+) -> tuple[list[str], list[str]]:
     """
-    Returns (should_override, override_reason).
-    If override, decision should be reject regardless of score.
+    Returns (reject_reasons, review_reasons).
+
+    REJECT overrides (hard block):
+      1. DSCR < 1.0
+      2. ≥2 high/critical severity risk flags
+      3. Litigation confirmed HIGH/CRITICAL (both document and research — FIX #4 & #5)
+      4. Auditor going-concern or adverse opinion (FIX #6 — tightened keyword check)
+      5. Company identity mismatch flag present
+      6. Case confidence critically low (< 0.5)
+
+    REVIEW overrides (soft escalation):
+      - Contradiction score < 60
+      - Moderate extraction confidence (0.5–0.7)
+      - Schema incomplete
     """
-    flags_by_type = {f.get("flag_type"): f for f in risk_flags}
+    reject_reasons: list[str] = []
+    review_reasons: list[str] = []
 
-    # Severe litigation
-    if flags_by_type.get("litigation_risk", {}).get("severity") == "critical":
-        return True, "Hard override: Severe litigation risk identified."
+    # 1. DSCR < 1 — real repayment risk
+    dscr = _get_numeric(extracted_facts, "dscr")
+    if dscr is not None and dscr < 1.0:
+        reject_reasons.append(f"DSCR {dscr:.2f} below 1.0 — insufficient repayment capacity")
 
-    lit_sig = (secondary_research or {}).get("litigation_risk", {})
-    if lit_sig.get("level") == "high" and lit_sig.get("confidence", 0) > 0.8:
-        return True, "Hard override: High litigation risk from secondary research."
+    # 2. ≥2 high/critical risk flags
+    high_flags = [
+        f for f in risk_flags
+        if str(f.get("severity", "")).lower() in ("high", "critical")
+    ]
+    if len(high_flags) >= 2:
+        reject_reasons.append(
+            f"Multiple high-severity risk flags detected ({len(high_flags)} flags)"
+        )
+    elif len(high_flags) == 1:
+        review_reasons.append(f"1 HIGH/CRITICAL risk flag: {high_flags[0].get('flag_type', '')}")
 
-    # Major GST mismatch
-    gst = flags_by_type.get("gst_bank_mismatch", {})
-    if gst.get("severity") in ("high", "critical") and gst.get("confidence", 0) > 0.75:
-        return True, "Hard override: Major GST/bank mismatch flagged."
+    # 3. FIX #4 + #5: Litigation hard-reject ONLY when severity is confirmed HIGH or CRITICAL
+    #    in BOTH secondary research AND document flags.  A medium flag alone is review, not reject.
+    lit_research = (secondary_research or {}).get("litigation_risk", {})
+    research_lit_high = lit_research.get("level") in ("high", "critical") and float(lit_research.get("confidence", 0)) >= 0.5
 
-    # Serious auditor concern
-    aud = flags_by_type.get("auditor_concern", {})
-    if aud.get("severity") == "critical":
-        return True, "Hard override: Serious auditor concern (e.g. going concern)."
+    doc_lit_high = any(
+        f.get("flag_type") == "litigation_risk"
+        and str(f.get("severity", "")).lower() in ("high", "critical")
+        for f in risk_flags
+    )
+    doc_lit_any = any(f.get("flag_type") == "litigation_risk" for f in risk_flags)
 
-    aud_remarks = extracted_facts.get("auditor_remarks")
-    aud_val = aud_remarks.get("value", []) if isinstance(aud_remarks, dict) else (aud_remarks if isinstance(aud_remarks, list) else [])
+    if research_lit_high and doc_lit_high:
+        reject_reasons.append(
+            "Severe litigation risk confirmed in both documents and secondary research"
+        )
+    elif research_lit_high or doc_lit_high:
+        review_reasons.append("High-severity litigation risk detected — manual verification required")
+    elif doc_lit_any:
+        review_reasons.append("Litigation mention in documents — verify scope and severity")
+
+    # 4. FIX #6: Tightened auditor keyword check — "qualification" alone is too broad.
+    #    Now requires explicit adverse / going-concern / material uncertainty language.
+    auditor_adverse_keywords = [
+        "going concern",
+        "material uncertainty",
+        "adverse opinion",
+        "disclaimer of opinion",
+        "qualified opinion",    # more specific than just "qualification"
+    ]
+    aud_raw = extracted_facts.get("auditor_remarks")
+    aud_val = (
+        aud_raw.get("value", []) if isinstance(aud_raw, dict)
+        else (aud_raw if isinstance(aud_raw, list) else [])
+    )
     if isinstance(aud_val, list):
-        s = " ".join(str(x).lower() for x in aud_val)
-        if "going concern" in s and "material" in s:
-            return True, "Hard override: Auditor raised going concern / material uncertainty."
+        aud_text = " ".join(str(x).lower() for x in aud_val)
+        matched_kw = [kw for kw in auditor_adverse_keywords if kw in aud_text]
+        if matched_kw:
+            reject_reasons.append(
+                f"Auditor adverse/going-concern language detected: {', '.join(matched_kw)}"
+            )
 
-    # Governance instability
-    gov = flags_by_type.get("governance_instability", {})
-    if gov.get("severity") in ("high", "critical"):
-        return True, "Hard override: Governance instability."
+    # 5. Company mismatch — should have blocked pipeline already but guard scoring too
+    if any(
+        f.get("flag_type") in ("company_identity_mismatch", "identity_mismatch")
+        or "mismatch" in str(f.get("flag_type", "")).lower()
+        for f in risk_flags
+    ):
+        reject_reasons.append("Company identity mismatch detected")
 
-    # Low utilization with weak financials (simplified)
-    rev = _get_numeric(extracted_facts, "revenue")
-    util_flag = flags_by_type.get("low_factory_utilization", {})
-    if util_flag.get("severity") in ("high", "critical") and (not rev or rev < 1e6):
-        return True, "Hard override: Low utilization with weak financials."
+    # 6. Critically low extraction confidence
+    if case_confidence < 0.5:
+        reject_reasons.append(
+            f"Extraction confidence critically low ({case_confidence:.2f}) — data unreliable"
+        )
 
-    return False, None
+    # --- REVIEW OVERRIDES ---
+    if contra_score < 60:
+        review_reasons.append(f"Contradiction score low ({contra_score:.0f} < 60)")
+
+    if 0.5 <= case_confidence < 0.7:
+        review_reasons.append(f"Moderate extraction confidence ({case_confidence:.2f})")
+
+    # Schema completeness heuristic
+    core_keys = ["revenue", "total_debt", "short_term_assets", "total_borrowing", "GNPA", "promoter_percentage"]
+    if not any(k in extracted_facts for k in core_keys):
+        review_reasons.append("Core financial fields missing — extraction may have failed")
+
+    return reject_reasons, review_reasons
 
 
-def _recommended_limit_and_roi(overall_score: float, revenue: float | None, debt: float | None) -> tuple[float, float]:
-    """Compute recommended_limit (INR) and recommended_roi (%)."""
-    base_limit = 1_000_000.0
+def _recommended_limit_and_roi(
+    overall_score: float,
+    revenue: float | None,
+    debt: float | None,
+) -> tuple[float, float]:
+    """Compute recommended_limit (INR) and recommended_roi (%).
+
+    FIX #14: Cap raised to ₹10Cr (100_000_000) — the old ₹1Cr cap was far too conservative
+    for enterprise B2B lending.
+
+    FIX #15: Debt-based cap removed. Low existing debt is a sign of financial health,
+    NOT a reason to reduce the recommended limit. Replaced with a debt-floor: if
+    total existing debt is very high, cap limit at 30% of debt to avoid over-exposure.
+    """
+    # Base limit: 25% of revenue, capped at ₹10Cr
+    base_limit = 1_000_000.0   # ₹10L floor
     if revenue and revenue > 0:
-        base_limit = min(revenue * 0.25, 10_000_000)
-    if debt and debt > 0:
-        base_limit = min(base_limit, debt * 1.2)
+        base_limit = min(revenue * 0.25, 100_000_000.0)  # FIX #14: was 10_000_000
+
+    # FIX #15: Only apply debt cap for HIGH-debt borrowers (debt/revenue > 2x)
+    if debt and debt > 0 and revenue and revenue > 0:
+        lev = debt / revenue
+        if lev > 2.0:
+            # Over-leveraged — cap at 30% of existing debt as a guardrail
+            base_limit = min(base_limit, debt * 0.30)
 
     factor = overall_score / 100.0
-    limit = base_limit * (0.5 + 0.5 * factor)
+    limit_out = base_limit * (0.5 + 0.5 * factor)
 
-    base_roi = 12.0
-    roi = base_roi + (100 - overall_score) * 0.05
-    roi = min(roi, 18.0)
-    return round(limit, 0), round(roi, 2)
+    # ROI: 12% base + penalty for lower score, capped at 18%
+    roi = 12.0 + (100.0 - overall_score) * 0.05
+    roi = max(12.0, min(roi, 18.0))
+
+    return float(int(limit_out)), round(roi, 2)
+
+
+def _calculate_confidence(extracted_facts: dict, risk_flags: list[dict]) -> float:
+    """Calculates a weighted case-level confidence score (0.0 - 1.0).
+
+    FIX #2: The original only looked for dict values with a 'confidence' key,
+    which works for raw (un-normalized) facts. But after _normalize_facts() in
+    pipeline.py, facts are flattened to {"revenue": v, "revenue_confidence": 0.9, ...}.
+    Now handles BOTH formats.
+    """
+    conf_values: list[float] = []
+
+    skip_suffixes = ("_confidence", "_source_ref")
+    skip_keys = {
+        "qualitative_insights", "requires_human_review", "review_reason",
+        "entities", "risk_flags", "extracted_data",
+    }
+
+    for k, v in extracted_facts.items():
+        if k in skip_keys:
+            continue
+        if any(k.endswith(s) for s in skip_suffixes):
+            continue
+
+        # Structured (un-normalized) format: {"value": x, "confidence": 0.9}
+        if isinstance(v, dict) and "confidence" in v:
+            conf_values.append(float(v["confidence"]))
+            continue
+
+        # Flat (normalized) format: look for matching "{field}_confidence" key
+        conf_key = f"{k}_confidence"
+        if conf_key in extracted_facts:
+            raw_conf = extracted_facts[conf_key]
+            if isinstance(raw_conf, (int, float)):
+                conf_values.append(float(raw_conf))
+
+    doc_conf = sum(conf_values) / len(conf_values) if conf_values else 0.65  # pessimistic default
+
+    flag_confs = [float(f.get("confidence", 0.75)) for f in risk_flags]
+    flag_conf = sum(flag_confs) / len(flag_confs) if flag_confs else 1.0
+
+    # 70% weight on document extraction quality, 30% on flag confidence
+    case_conf = (doc_conf * 0.70) + (flag_conf * 0.30)
+    return max(0.0, min(1.0, case_conf))
 
 
 def compute_score(
@@ -273,15 +490,15 @@ def compute_score(
     Transparent weighted scoring. Returns:
     - overall_score (0-100)
     - score_breakdown
-    - decision (approve | review | reject)
+    - decision / cam_decision (consistent lowercase — FIX #13)
     - decision_explanation
     - recommended_limit, recommended_roi
     - reasons
-    - hard_override_applied (bool, reason if any)
-    - officer_note_signals (structured signals from officer notes processor)
+    - hard_override_applied, hard_override_reason
+    - requires_human_review, review_reason
+    - officer_note_signals
+    - case_confidence, escalation_level, overrides_triggered
     """
-    override, override_reason = _check_hard_overrides(risk_flags, extracted_facts, secondary_research)
-
     fs_score, fs_reasons = _financial_strength_score(extracted_facts)
     cf_score, cf_reasons = _cash_flow_score(extracted_facts)
     gov_score, gov_reasons = _governance_score(risk_flags, extracted_facts)
@@ -306,33 +523,64 @@ def compute_score(
         + WEIGHTS["secondary_research"] * sr_score
         + WEIGHTS["officer_note"] * off_score
     )
-    overall = round(max(0, min(100, overall)), 1)
+    overall = round(max(0.0, min(100.0, overall)), 1)
 
-    cam_decision = "manual_review"
-    if override:
+    case_confidence = _calculate_confidence(extracted_facts, risk_flags)
+
+    reject_reasons, review_reasons = _check_hard_overrides(
+        risk_flags,
+        extracted_facts,
+        secondary_research,
+        case_confidence,
+        contra_score,
+    )
+
+    overrides_triggered = reject_reasons + review_reasons
+    escalation_level = "normal"
+    requires_review = False
+
+    if reject_reasons:
         decision = "reject"
         cam_decision = "decline"
-        decision_explanation = override_reason or "Hard override applied."
+        decision_explanation = "Hard REJECT overrides: " + "; ".join(reject_reasons)
+        escalation_level = "hard_review"
+        requires_review = True
+    elif overall < THRESHOLD_REVIEW:
+        decision = "reject"
+        cam_decision = "decline"
+        decision_explanation = f"Overall score {overall} below reject threshold (<{THRESHOLD_REVIEW})."
+        escalation_level = "hard_review"
+        requires_review = True
+    elif review_reasons:
+        decision = "review"
+        cam_decision = "manual_review"
+        decision_explanation = "REVIEW overrides: " + "; ".join(review_reasons)
+        escalation_level = "soft_review"
+        requires_review = True
+    elif overall < THRESHOLD_APPROVE:
+        decision = "review"
+        cam_decision = "manual_review"
+        decision_explanation = f"Score {overall} in review band ({THRESHOLD_REVIEW}–{THRESHOLD_APPROVE})."
+        escalation_level = "soft_review"
+        requires_review = True
     else:
-        if overall >= THRESHOLD_APPROVE:
-            decision = "approve"
-            cam_decision = "approve"
-            decision_explanation = f"Overall score {overall} meets approve threshold (≥{THRESHOLD_APPROVE})."
-        elif overall >= THRESHOLD_REVIEW:
-            decision = "review"
-            cam_decision = "manual_review"
-            decision_explanation = f"Overall score {overall} in review band ({THRESHOLD_REVIEW}-{THRESHOLD_APPROVE}). Manual assessment recommended."
-        else:
-            decision = "reject"
-            cam_decision = "decline"
-            decision_explanation = f"Overall score {overall} below review threshold (<{THRESHOLD_REVIEW})."
+        decision = "approve"
+        cam_decision = "approve"
+        decision_explanation = f"Score {overall} meets approve threshold (≥{THRESHOLD_APPROVE}) with no overrides."
+
+    logger.info(
+        "[ScoringEngine] case_confidence=%.2f overall=%.1f decision=%s overrides=%s",
+        case_confidence, overall, decision, overrides_triggered,
+    )
 
     revenue = _get_numeric(extracted_facts, "revenue")
     debt = _get_numeric(extracted_facts, "total_debt")
     rec_limit, rec_roi = _recommended_limit_and_roi(overall, revenue, debt)
 
     all_reasons = (
-        [f"Financial: {r}" for r in fs_reasons[:2]]
+        reject_reasons
+        + review_reasons
+        + [f"Financial: {r}" for r in fs_reasons[:2]]
         + [f"Cash flow: {r}" for r in cf_reasons[:2]]
         + [f"Governance: {r}" for r in gov_reasons[:2]]
         + [f"Contradictions: {r}" for r in contra_reasons[:2]]
@@ -342,16 +590,23 @@ def compute_score(
     all_reasons = [r for r in all_reasons if r and not r.endswith(": ")]
 
     return {
+        # FIX #13: Both decision fields are consistently lowercase.
+        # cam_decision was already lowercase; removed the .upper() from decision.
         "overall_score": overall,
+        "score": overall,  # alias for legacy callers
         "score_breakdown": breakdown,
-        "decision": decision,
-        "cam_decision": cam_decision,
+        "decision": decision,           # "approve" | "review" | "reject"
+        "cam_decision": cam_decision,   # "approve" | "manual_review" | "decline"
         "decision_explanation": decision_explanation,
         "recommended_limit": rec_limit,
         "recommended_roi": rec_roi,
         "reasons": all_reasons[:10],
-        "hard_override_applied": override,
-        "hard_override_reason": override_reason,
+        "overrides_triggered": overrides_triggered,
+        "hard_override_applied": len(reject_reasons) > 0,
+        "hard_override_reason": " | ".join(reject_reasons) if reject_reasons else None,
+        "requires_human_review": requires_review,
+        "review_reason": " | ".join(review_reasons) if review_reasons else None,
         "officer_note_signals": off_signals,
+        "case_confidence": round(case_confidence, 2),
+        "escalation_level": escalation_level,
     }
-

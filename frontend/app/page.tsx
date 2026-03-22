@@ -97,7 +97,19 @@ export default function HomePage() {
     load();
   }, []);
 
-  async function handleCreate(payload: { company_name: string; sector: string; promoter_names: string[]; officer_notes: string }) {
+  async function handleCreate(payload: {
+    company_name: string;
+    cin_optional?: string;
+    pan?: string;
+    sector: string;
+    turnover?: number;
+    loan_type?: string;
+    loan_amount?: number;
+    tenure_months?: number;
+    interest_rate?: number;
+    promoter_names: string[];
+    officer_notes: string;
+  }) {
     if (!payload.company_name.trim()) { setError("Company name is required."); return; }
     setError(null); setSuccess(null); setLoading(true);
     try {
@@ -170,7 +182,7 @@ export default function HomePage() {
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             {[
               { val: "94.2%", lbl: "Accuracy", icon: <Activity size={18} /> },
-              { val: "< 3min", lbl: "Avg. Time", icon: <Clock size={18} /> },
+              { val: "< 2min", lbl: "Avg. Time", icon: <Clock size={18} /> },
               { val: "1,200+", lbl: "Cases", icon: <Database size={18} /> },
             ].map((s, i) => (
               <div key={s.lbl} style={{

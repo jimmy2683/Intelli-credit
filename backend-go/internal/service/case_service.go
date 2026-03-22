@@ -43,7 +43,13 @@ func (s *CaseService) CreateCase(req model.CreateCaseRequest) *model.CreditCase 
 		CaseID:        id,
 		CompanyName:   req.CompanyName,
 		CINOptional:   req.CINOptional,
+		PAN:           req.PAN,
 		Sector:        req.Sector,
+		Turnover:      req.Turnover,
+		LoanType:      req.LoanType,
+		LoanAmount:    req.LoanAmount,
+		TenureMonths:  req.TenureMonths,
+		InterestRate:  req.InterestRate,
 		PromoterNames: req.PromoterNames,
 		OfficerNotes:  req.OfficerNotes,
 		CreatedAt:     now.Format(time.RFC3339),
@@ -104,6 +110,41 @@ func (s *CaseService) UpdateOfficerNotes(id, notes string) (*model.CreditCase, e
 		return nil, err
 	}
 	c.OfficerNotes = notes
+	if err := s.db.UpdateCase(c); err != nil {
+		return nil, fmt.Errorf("db update: %w", err)
+	}
+	return c, nil
+}
+
+func (s *CaseService) ConfirmClassification(id, fileName, confirmedType string) (*model.CreditCase, error) {
+	c, err := s.GetCase(id)
+	if err != nil {
+		return nil, err
+	}
+	found := false
+	for i, f := range c.UploadedFiles {
+		if f.FileName == fileName {
+			c.UploadedFiles[i].UserConfirmedType = confirmedType
+			found = true
+			break
+		}
+	}
+	if !found {
+		return nil, fmt.Errorf("file not found in case")
+	}
+	if err := s.db.UpdateCase(c); err != nil {
+		return nil, fmt.Errorf("db update: %w", err)
+	}
+	return c, nil
+}
+
+func (s *CaseService) UpdateSchema(ctx context.Context, id string, schema map[string]any) (*model.CreditCase, error) {
+	c, err := s.GetCase(id)
+	if err != nil {
+		return nil, err
+	}
+	c.ExtractionSchema = schema
+	c.SchemaVersion = "1.0-custom"
 	if err := s.db.UpdateCase(c); err != nil {
 		return nil, fmt.Errorf("db update: %w", err)
 	}
@@ -174,7 +215,7 @@ func (s *CaseService) SaveUploadedFiles(id string, files []*multipart.FileHeader
 	return saved, nil
 }
 
-func (s *CaseService) AnalyzeCase(id string) (*model.CreditCase, error) {
+func (s *CaseService) AnalyzeCase(id string, filesToAnalyze []string) (*model.CreditCase, error) {
 	c, err := s.GetCase(id)
 	if err != nil {
 		return nil, err
@@ -182,11 +223,28 @@ func (s *CaseService) AnalyzeCase(id string) (*model.CreditCase, error) {
 	c.Status = "processing"
 	s.db.UpdateCase(c)
 
+	var targetFiles []model.UploadedFile
+	if len(filesToAnalyze) > 0 {
+		fileMap := make(map[string]bool)
+		for _, f := range filesToAnalyze {
+			fileMap[f] = true
+		}
+		for _, f := range c.UploadedFiles {
+			if fileMap[f.FileName] {
+				targetFiles = append(targetFiles, f)
+			}
+		}
+	} else {
+		targetFiles = c.UploadedFiles
+	}
+
 	input := map[string]any{
 		"case_id":                c.CaseID,
 		"company_details":        map[string]any{"company_name": c.CompanyName, "sector": c.Sector, "cin_optional": c.CINOptional, "promoter_names": c.PromoterNames},
-		"uploaded_file_metadata": c.UploadedFiles,
+		"uploaded_file_metadata": targetFiles,
 		"officer_notes":          c.OfficerNotes,
+		"extraction_schema":      c.ExtractionSchema,
+		"schema_version":         c.SchemaVersion,
 	}
 
 	// ── Step 1: Extract ──
@@ -263,7 +321,11 @@ func (s *CaseService) AnalyzeCase(id string) (*model.CreditCase, error) {
 
 	// ── Persist results ──
 	c.ExtractedFacts = asMap(extractResp["extracted_facts"])
-	c.RiskFlags = asRiskFlags(researchResp["risk_flags"])
+	
+	allFlags := asRiskFlags(extractResp["risk_flags"])
+	allFlags = append(allFlags, asRiskFlags(researchResp["risk_flags"])...)
+	c.RiskFlags = allFlags
+	
 	c.CAMResult = &model.CAMResult{
 		CaseID:           id,
 		FinalDecision:    asString(camResp["final_decision"], "manual_review"),
@@ -286,7 +348,25 @@ func (s *CaseService) AnalyzeCase(id string) (*model.CreditCase, error) {
 		Reasons:             asStringSlice(scoreResp["reasons"]),
 		HardOverrideApplied: asBool(scoreResp["hard_override_applied"]),
 		HardOverrideReason:  asString(scoreResp["hard_override_reason"], ""),
+		RequiresHumanReview: asBool(scoreResp["requires_human_review"]),
+		ReviewReason:        asString(scoreResp["review_reason"], ""),
+		EscalationLevel:     asString(scoreResp["escalation_level"], "normal"),
 	}
+
+	// ── Finalize Escalation ──
+	c.RequiresHumanReview = c.ScoreResult.RequiresHumanReview
+	c.ReviewReason = c.ScoreResult.ReviewReason
+	c.EscalationLevel = c.ScoreResult.EscalationLevel
+
+	// Special check for identity mismatch in flags
+	for _, f := range c.RiskFlags {
+		if f.FlagType == "company_identity_mismatch" {
+			c.RequiresHumanReview = true
+			c.EscalationLevel = "critical"
+			c.ReviewReason = "CRITICAL: Document company name mismatch detected."
+		}
+	}
+
 	if notesSignals != nil {
 		c.OfficerNoteSignals = asOfficerNoteSignals(notesSignals)
 	}

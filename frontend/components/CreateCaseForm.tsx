@@ -3,7 +3,19 @@
 import { FormEvent, useState } from "react";
 
 type Props = {
-  onCreate: (p: { company_name: string; sector: string; promoter_names: string[]; officer_notes: string }) => Promise<void>;
+  onCreate: (p: {
+    company_name: string;
+    cin_optional?: string;
+    pan?: string;
+    sector: string;
+    turnover?: number;
+    loan_type?: string;
+    loan_amount?: number;
+    tenure_months?: number;
+    interest_rate?: number;
+    promoter_names: string[];
+    officer_notes: string;
+  }) => Promise<void>;
   loading: boolean; error: string | null; success: string | null;
 };
 
@@ -20,14 +32,31 @@ function StepChip({ n, label, color }: { n: number; label: string; color: string
 
 export default function CreateCaseForm({ onCreate, loading, error, success }: Props) {
   const [companyName, setCompanyName] = useState("");
+  const [cin, setCin]                 = useState("");
+  const [pan, setPan]                 = useState("");
   const [sector, setSector]           = useState("");
+  const [turnover, setTurnover]       = useState("");
+
+  const [loanType, setLoanType]       = useState("Term Loan");
+  const [loanAmount, setLoanAmount]   = useState("");
+  const [tenure, setTenure]           = useState("");
+  const [interest, setInterest]       = useState("");
+
   const [promoters, setPromoters]     = useState("");
   const [officerNotes, setOfficerNotes] = useState("");
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     await onCreate({
-      company_name: companyName.trim(), sector: sector.trim(),
+      company_name: companyName.trim(),
+      cin_optional: cin.trim(),
+      pan: pan.trim(),
+      sector: sector.trim(),
+      turnover: turnover ? parseFloat(turnover) : undefined,
+      loan_type: loanType.trim(),
+      loan_amount: loanAmount ? parseFloat(loanAmount) : undefined,
+      tenure_months: tenure ? parseInt(tenure, 10) : undefined,
+      interest_rate: interest ? parseFloat(interest) : undefined,
       promoter_names: promoters.split(",").map(p => p.trim()).filter(Boolean),
       officer_notes: officerNotes.trim(),
     });
@@ -41,35 +70,74 @@ export default function CreateCaseForm({ onCreate, loading, error, success }: Pr
 
         {/* Step 1 */}
         <div>
-          <StepChip n={1} label="Company Identity" color="var(--primary)" />
-          <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+          <StepChip n={1} label="Entity Details" color="var(--primary)" />
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <div>
               <label htmlFor="cn">Company Name *</label>
               <input id="cn" value={companyName} onChange={e=>setCompanyName(e.target.value)} placeholder="e.g. Acme Manufacturing Ltd" required />
             </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div>
+                <label htmlFor="cin">CIN</label>
+                <input id="cin" value={cin} onChange={e=>setCin(e.target.value)} placeholder="e.g. L..." />
+              </div>
+              <div>
+                <label htmlFor="pan">PAN</label>
+                <input id="pan" value={pan} onChange={e=>setPan(e.target.value)} placeholder="e.g. ABCDE1234F" />
+              </div>
+            </div>
             <div>
-              <label htmlFor="sec">Industrial Sector *</label>
+              <label htmlFor="sec">Sector *</label>
               <input id="sec" value={sector} onChange={e=>setSector(e.target.value)} placeholder="e.g. Pharmaceuticals" list="sectors" required />
               <datalist id="sectors">{SECTORS.map(s=><option key={s} value={s}/>)}</datalist>
+            </div>
+            <div>
+              <label htmlFor="turnover">Turnover (₹)</label>
+              <input id="turnover" type="number" step="any" value={turnover} onChange={e=>setTurnover(e.target.value)} placeholder="e.g. 50000000" />
+            </div>
+            <div>
+              <label htmlFor="prm">Promoters (comma-separated)</label>
+              <input id="prm" value={promoters} onChange={e=>setPromoters(e.target.value)} placeholder="e.g. John Doe, Jane Smith" />
+              {promoterList.length > 0 && (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+                  {promoterList.map((p,i) => (
+                    <span key={i} style={{ padding: "3px 10px", background: "var(--accent-2)", color: "var(--accent)", border: "1px solid var(--accent-2)", borderRadius: "var(--r-full)", fontSize: 12, fontWeight: 600 }}>
+                      👤 {p.trim()}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </div>
 
         {/* Step 2 */}
         <div>
-          <StepChip n={2} label="Promoters & Directors" color="var(--accent)" />
-          <div>
-            <label htmlFor="prm">Names (comma-separated)</label>
-            <input id="prm" value={promoters} onChange={e=>setPromoters(e.target.value)} placeholder="e.g. John Doe, Jane Smith" />
-            {promoterList.length > 0 && (
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
-                {promoterList.map((p,i) => (
-                  <span key={i} style={{ padding: "3px 10px", background: "var(--accent-2)", color: "var(--accent)", border: "1px solid var(--accent-2)", borderRadius: "var(--r-full)", fontSize: 12, fontWeight: 600 }}>
-                    👤 {p.trim()}
-                  </span>
-                ))}
+          <StepChip n={2} label="Loan Details" color="var(--accent)" />
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div>
+              <label htmlFor="ltype">Loan Type</label>
+              <select id="ltype" value={loanType} onChange={e=>setLoanType(e.target.value)} className="w-full" style={{ padding: "8px 12px", borderRadius: "var(--r-md)", border: "1px solid var(--line)", background: "var(--card)" }}>
+                <option value="Term Loan">Term Loan</option>
+                <option value="Working Capital">Working Capital</option>
+                <option value="Revolving Facility">Revolving Facility</option>
+                <option value="Equipment Finance">Equipment Finance</option>
+              </select>
+            </div>
+            <div>
+              <label htmlFor="lamt">Loan Amount (₹)</label>
+              <input id="lamt" type="number" step="any" value={loanAmount} onChange={e=>setLoanAmount(e.target.value)} placeholder="e.g. 10000000" />
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div>
+                <label htmlFor="ltenure">Tenure (Months)</label>
+                <input id="ltenure" type="number" value={tenure} onChange={e=>setTenure(e.target.value)} placeholder="e.g. 36" />
               </div>
-            )}
+              <div>
+                <label htmlFor="lrate">Interest Rate (%)</label>
+                <input id="lrate" type="number" step="0.01" value={interest} onChange={e=>setInterest(e.target.value)} placeholder="e.g. 12.5" />
+              </div>
+            </div>
           </div>
         </div>
 
