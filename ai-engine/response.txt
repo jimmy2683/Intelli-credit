@@ -1,0 +1,17 @@
+{
+  "total_borrowing": {
+    "value": 2052650000.0,
+    "confidence": 0.95,
+    "source_ref": "doc5_chunk4"
+  },
+  "top_lender_exposure": {
+    "value": 150000000.0,
+    "confidence": 0.9,
+    "source_ref": "doc5_chunk1"
+  },
+  "avg_interest_rate": {
+    "value": null,
+    "confidence": 0.0,
+    "source_ref": null
+  }
+}

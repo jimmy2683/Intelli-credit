@@ -89,11 +89,11 @@ def get_expert_prompt(doc_type: str, custom_schema: Optional[Dict[str, Any]] = N
         "     - <0.7 → weak (prefer null)\n"
         "3. Assign source_ref as the chunk id shown in [ID: ...] prefix\n\n"
         "4. If field not present → value = null, confidence = 0.0\n\n"
-        "5. Do NOT:\n"
-        "   - infer\n"
-        "   - calculate\n"
-        "   - assume\n"
-        "   - summarize (unless instructed for text arrays below)\n\n"
+        "5. CALCULATIONS ALLOWED:\n"
+        "   - If a requested metric (like EBITDA, PAT, Net Worth, DSCR) is not explicitly stated,\n"
+        "     you MUST mathematically calculate it if the underlying components (e.g., Operating Profit + Depreciation) are clearly present in the text.\n"
+        "   - If you calculate a value, set confidence to 0.8 and note 'Calculated by AI' in the source_ref.\n"
+        "   - Do not summarize unless instructed for text arrays below.\n\n"
         "6. Ensure output is valid JSON\n\n"
         "GLOBAL RULES:\n"
         "1. STRICT JSON OUTPUT\n"
@@ -110,10 +110,9 @@ def get_expert_prompt(doc_type: str, custom_schema: Optional[Dict[str, Any]] = N
         "- If value explicitly stated as 0, return 0.0\n"
         "- If value not found or uncertain, return null\n"
         "- NEVER guess values\n\n"
-        "4. NO HALLUCINATION\n"
-        "- Extract only from given text\n"
-        "- Do not infer missing values\n"
-        "- Do not use prior knowledge\n\n"
+        "4. NO EXTERNAL HALLUCINATION\n"
+        "- Extract or mathematically derive values only from the given text.\n"
+        "- Do not use prior knowledge outside the provided chunks.\n\n"
         "5. CONFIDENCE SCORING\n"
         "- Each field must include value, confidence (0.0-1.0), and source_ref (chunk id)\n\n"
         "6. FIELD MAPPING RULES\n"
@@ -129,7 +128,7 @@ def get_expert_prompt(doc_type: str, custom_schema: Optional[Dict[str, Any]] = N
         "- DO NOT copy-paste raw text chunks. Keep each string summary under 100 characters.\n"
         "- If no matching facts are found, return an empty list [], not null.\n\n"
         "FAILURE HANDLING:\n"
-        "If text is irrelevant or schema fields not found:\n"
+        "If text is irrelevant or schema fields not found: try to calculate those values from the given text.\n"
         "Return all fields = null, confidence = 0.0\n\n"
         "Ensure about lacs or crores are converted to absolute values.\n\n"
         "VALIDATION:\n"
@@ -228,7 +227,12 @@ def extract_with_ai(
     try:
         response_text = call_mistral(prompt, response_format={"type": "json_object"})
         logger.info("AI RAW RESPONSE (top 300 chars): %s", response_text[:300])
+        
+        with open("response.txt", "w", encoding="utf-8") as f:
+            f.write(response_text)
+            
         result = extract_json_safely(response_text)
+        
 
         # Unwrap "fields" wrapper if model strictly followed schema format
         if isinstance(result, dict) and "fields" in result and isinstance(result["fields"], dict):

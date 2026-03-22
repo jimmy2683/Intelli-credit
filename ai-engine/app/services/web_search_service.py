@@ -24,6 +24,7 @@ CRITICAL DISAMBIGUATION RULES:
 2. Pay special attention to its promoters: {promoter_names_str}.
 3. If a news item is about a completely different company with a similar name, IGNORE IT.
 4. Only flag litigation that involves THIS company or its named promoters — not homonyms.
+5. If some fields of schemas are missing then try to fill those values from the given text + web crawlers (and mention that it is fetched by crawler).
 
 Target Company: {company_name}
 Sector: {sector}

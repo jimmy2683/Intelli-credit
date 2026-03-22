@@ -265,11 +265,17 @@ export default function CasePage() {
    *  • Internal meta arrays/objects (extracted_entities, document_sources, auditor_remarks)
    *  • Sibling "_confidence" and "_source_ref" keys (shown inline in each row instead)
    */
-  const factKeys = Object.keys(facts).filter(k =>
-    !["extracted_entities", "document_sources", "auditor_remarks"].includes(k) &&
-    !k.endsWith("_confidence") &&
-    !k.endsWith("_source_ref")
-  );
+  const factKeys = Object.keys(facts).filter(k => {
+    if (["extracted_entities", "document_sources", "auditor_remarks"].includes(k)) return false;
+    if (k.endsWith("_confidence") || k.endsWith("_source_ref")) return false;
+    
+    const val = facts[k];
+    if (val == null) return false;
+    if (typeof val === "number" && Number.isNaN(val)) return false;
+    if (typeof val === "string" && (val.toLowerCase() === "nan" || val.toLowerCase() === "n/a")) return false;
+    
+    return true;
+  });
 
   const fetchCase = useCallback(async () => {
     if (!caseId) return;

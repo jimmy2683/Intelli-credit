@@ -61,25 +61,23 @@ def resolve_path(file_path: str | None, case_id: str | None) -> Path | None:
     return None
 
 
-def _extract_text_pypdf(path: Path) -> str:
+def _extract_text_pypdf(path: Path, max_pages: int = 10) -> str:
     try:
         from pypdf import PdfReader
         reader = PdfReader(str(path))
-        # Limit to the first 20 pages
-        pages_to_read = reader.pages[:20]
+        pages_to_read = reader.pages[:max_pages]
         return "\n\n".join(page.extract_text() or "" for page in pages_to_read)
     except Exception as e:
         logger.warning("pypdf extraction failed for %s: %s", path, e)
         return ""
 
 
-def _extract_text_pdfplumber(path: Path) -> str:
+def _extract_text_pdfplumber(path: Path, max_pages: int = 10) -> str:
     try:
         import pdfplumber
         parts = []
         with pdfplumber.open(path) as pdf:
-            # Limit to the first 20 pages
-            for page in pdf.pages[:20]:
+            for page in pdf.pages[:max_pages]:
                 parts.append(page.extract_text() or "")
         return "\n\n".join(parts)
     except Exception as e:
@@ -87,12 +85,11 @@ def _extract_text_pdfplumber(path: Path) -> str:
         return ""
 
 
-def _extract_text_ocr(path: Path) -> str:
+def _extract_text_ocr(path: Path, max_pages: int = 10) -> str:
     try:
         import pdf2image
         import pytesseract
-        # Use last_page=20 to prevent converting the entire PDF into images in memory
-        images = pdf2image.convert_from_path(str(path), dpi=150, last_page=20)
+        images = pdf2image.convert_from_path(str(path), dpi=150, last_page=max_pages)
         return "\n\n".join(pytesseract.image_to_string(img, lang="eng") or "" for img in images)
     except ImportError as e:
         logger.warning("OCR dependencies missing: %s", e)
@@ -103,16 +100,18 @@ def _extract_text_ocr(path: Path) -> str:
 
 def extract_text_from_pdf(path: Path) -> tuple[str, bool]:
     """
-    Extract text from PDF. Try pdfplumber first (better tables), then pypdf, then OCR.
+    Extract text from PDF. As requested, prioritize OCR for the first 10 pages.
+    Fallback to pdfplumber/pypdf ONLY if OCR dependencies are missing or execution fails.
     Returns (text, used_ocr).
     """
-    text = _extract_text_pdfplumber(path)
+    ocr_text = _extract_text_ocr(path, max_pages=10)
+    if ocr_text.strip():
+        return (ocr_text, True)
+    
+    # Fallbacks (e.g. Tesseract or Poppler missing)
+    text = _extract_text_pdfplumber(path, max_pages=10)
     if not text.strip():
-        text = _extract_text_pypdf(path)
-    if len(text.strip()) < MIN_TEXT_FOR_OCR:
-        ocr_text = _extract_text_ocr(path)
-        if ocr_text.strip():
-            return (ocr_text, True)
+        text = _extract_text_pypdf(path, max_pages=10)
     return (text, False)
 
 
@@ -127,6 +126,8 @@ def extract_text_from_file(path: Path) -> tuple[str, bool]:
             return ("", False)
     elif suf == ".csv":
         return (_extract_text_csv(path), False)
+    elif suf == ".xlsx":
+        return (_extract_text_xlsx(path), False)
     elif suf == ".pdf":
         return extract_text_from_pdf(path)
     logger.warning("Unsupported file extension '%s' for %s", suf, path)
@@ -335,4 +336,22 @@ def _extract_text_csv(path: Path) -> str:
         return "\n".join(text_parts)
     except Exception as e:
         logger.warning("CSV extraction failed for %s: %s", path, e)
+        return ""
+
+
+def _extract_text_xlsx(path: Path) -> str:
+    """Extract and format text from an Excel file for LLM comprehension."""
+    try:
+        import pandas as pd
+        text_parts = []
+        dfs = pd.read_excel(path, sheet_name=None)
+        for sheet_name, df in dfs.items():
+            text_parts.append(f"--- Sheet: {sheet_name} ---")
+            text_parts.append(df.to_csv(index=False))
+        return "\n".join(text_parts)
+    except ImportError:
+        logger.warning("pandas or openpyxl missing. Cannot parse %s", path)
+        return ""
+    except Exception as e:
+        logger.warning("XLSX extraction failed for %s: %s", path, e)
         return ""

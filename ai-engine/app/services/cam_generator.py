@@ -21,6 +21,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .mistral_service import call_mistral
+from .ai_extraction import extract_json_safely
+
 logger = logging.getLogger(__name__)
 
 DATA_ROOT = Path(os.environ.get("DATA_ROOT", "../data"))
@@ -143,6 +146,42 @@ def _add_financial_table(doc: "Document", facts: dict):
 # ---------------------------------------------------------------------------
 # SWOT & Five Cs computation
 # ---------------------------------------------------------------------------
+
+def _generate_ai_cam_content(facts: dict, flags: list, score: dict, company: dict) -> dict | None:
+    prompt = f"""
+You are an expert Senior Credit Analyst writing an institutional Credit Appraisal Memo (CAM) for a multi-million dollar corporate exposure.
+Synthesize the following data into professional, detailed financial prose. DO NOT invent numbers. Use only the provided data.
+
+COMPANY: {company.get('company_name', 'Unknown')}
+FACTS: {facts}
+RISK FLAGS: {flags}
+SCORE: {score.get('overall_score')} - {score.get('decision_explanation')}
+
+Output valid JSON exactly matching this structure:
+{{
+  "executive_summary": "A highly detailed, 2-3 paragraph professional summary explaining the credit decision, weighing the core financial strengths against the hard risks.",
+  "swot": {{
+    "Strengths": ["Detailed point 1...", "Detailed point 2..."],
+    "Weaknesses": ["Detailed point 1...", "Detailed point 2..."],
+    "Opportunities": ["Detailed point 1...", "Detailed point 2..."],
+    "Threats": ["Detailed point 1...", "Detailed point 2..."]
+  }},
+  "five_cs": {{
+    "Character": "Detailed analysis of promoters, governance, and reputational risk flags.",
+    "Capacity": "Detailed analysis of DSCR, cash flows, and ability to service debt.",
+    "Capital": "Detailed analysis of revenue, net worth, leverage, and working capital.",
+    "Collateral": "Assessment of collateral availability or requirement based on risk profile.",
+    "Conditions": "Analysis of macroeconomic, sector headwinds, and regulatory environment."
+  }}
+}}
+"""
+    try:
+        response = call_mistral(prompt, response_format={"type": "json_object"})
+        return extract_json_safely(response)
+    except Exception as e:
+        logger.error("AI CAM generation failed: %s", e)
+        return None
+
 
 def _compute_swot(
     facts: dict,
@@ -305,10 +344,15 @@ def generate_cam_docx(
     evidence_dir = DATA_ROOT / "evidence" / case_id
     evidence_dir.mkdir(parents=True, exist_ok=True)
 
+    cd = company_details or {}
+    
+    # ── Attempt to generate rich AI prose first ──
+    ai_content = _generate_ai_cam_content(extracted_facts, risk_flags, score_result, cd)
+
     if not HAS_DOCX:
         return _generate_cam_markdown(
             case_id, company_details, extracted_facts,
-            risk_flags, score_result, officer_notes, evidence_dir,
+            risk_flags, score_result, officer_notes, evidence_dir, ai_content,
         )
 
     doc = Document()
@@ -356,9 +400,13 @@ def generate_cam_docx(
         run.bold = True
         run.font.color.rgb = RGBColor(0xCC, 0x00, 0x00)
 
-    explanation = score_result.get("decision_explanation", "")
-    if explanation:
-        doc.add_paragraph(explanation)
+    ai_exec_sum = ai_content.get("executive_summary") if ai_content else None
+    if ai_exec_sum:
+        doc.add_paragraph(str(ai_exec_sum))
+    else:
+        explanation = score_result.get("decision_explanation", "")
+        if explanation:
+            doc.add_paragraph(explanation)
 
     # ── 2. Borrower Profile ──
     _add_styled_heading(doc, "2. Borrower Profile", 1)
@@ -413,18 +461,26 @@ def generate_cam_docx(
 
     # ── 6. SWOT Analysis ──
     _add_styled_heading(doc, "6. SWOT Analysis", 1)
-    swot = _compute_swot(extracted_facts, risk_flags, score_result, cd)
+    if ai_content and isinstance(ai_content.get("swot"), dict):
+        swot = ai_content["swot"]
+    else:
+        swot = _compute_swot(extracted_facts, risk_flags, score_result, cd)
+        
     for category, items in swot.items():
         doc.add_heading(category, level=2)
         for item in items:
-            doc.add_paragraph(item, style="List Bullet")
+            doc.add_paragraph(str(item), style="List Bullet")
 
     # ── 7. Five Cs of Credit ──
     _add_styled_heading(doc, "7. Five Cs of Credit", 1)
-    five_cs = _compute_five_cs(extracted_facts, risk_flags, score_result, cd)
+    if ai_content and isinstance(ai_content.get("five_cs"), dict):
+        five_cs = ai_content["five_cs"]
+    else:
+        five_cs = _compute_five_cs(extracted_facts, risk_flags, score_result, cd)
+        
     for c_name, c_assessment in five_cs.items():
-        doc.add_heading(c_name, level=2)
-        doc.add_paragraph(c_assessment)
+        doc.add_heading(str(c_name), level=2)
+        doc.add_paragraph(str(c_assessment))
 
     # ── 8. Red Flags ──
     _add_styled_heading(doc, "8. Red Flags", 1)
@@ -502,6 +558,7 @@ def _generate_cam_markdown(
     score_result: dict,
     officer_notes: str | None,
     evidence_dir: Path,
+    ai_content: dict | None = None,
 ) -> str:
     cd = company_details or {}
     company       = cd.get("company_name", "Unknown Company")
@@ -522,6 +579,12 @@ def _generate_cam_markdown(
         f"- **Recommended Limit:** {_fmt_inr(rec_limit)}",
         f"- **Recommended ROI:** {rec_roi}%",
         "",
+    ]
+    if ai_content and ai_content.get("executive_summary"):
+        lines.append(str(ai_content["executive_summary"]))
+        lines.append("")
+
+    lines.extend([
         "## 2. Borrower Profile",
         f"- **Company:** {company}",
         f"- **CIN:** {cd.get('cin_optional', 'N/A')}",
@@ -541,7 +604,7 @@ def _generate_cam_markdown(
         f"| DSCR | {_fmt_ratio(_get_v(extracted_facts, 'dscr'))} |",                     # FIX #A1
         "",
         "## 4. Risk Flags",
-    ]
+    ])
 
     for flag in risk_flags:
         lines.append(
@@ -552,7 +615,11 @@ def _generate_cam_markdown(
         lines.append("- No significant risk flags.")
 
     lines.extend(["", "## 5. SWOT Analysis"])
-    swot = _compute_swot(extracted_facts, risk_flags, score_result, cd)
+    if ai_content and isinstance(ai_content.get("swot"), dict):
+        swot = ai_content["swot"]
+    else:
+        swot = _compute_swot(extracted_facts, risk_flags, score_result, cd)
+        
     for category, items in swot.items():
         lines.append(f"### {category}")
         for item in items:
@@ -571,9 +638,13 @@ def _generate_cam_markdown(
         "",
         "## 7. Five Cs of Credit",
     ])
-    five_cs = _compute_five_cs(extracted_facts, risk_flags, score_result, cd)
+    if ai_content and isinstance(ai_content.get("five_cs"), dict):
+        five_cs = ai_content["five_cs"]
+    else:
+        five_cs = _compute_five_cs(extracted_facts, risk_flags, score_result, cd)
+        
     for c_name, c_text in five_cs.items():
-        lines.append(f"**{c_name}:** {c_text}")
+        lines.append(f"**{c_name}:** {str(c_text)}")
         lines.append("")
 
     lines.extend([
