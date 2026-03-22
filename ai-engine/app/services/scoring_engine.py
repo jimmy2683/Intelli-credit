@@ -400,40 +400,103 @@ def _check_hard_overrides(
     return reject_reasons, review_reasons
 
 
+_CR = 1e7          # 1 crore in rupees
+_PLATFORM_CAP = 500 * _CR   # ₹500 Cr max single-lender exposure on this platform
+
+
+def _revenue_tier_base(revenue: float) -> float:
+    """
+    Size-appropriate base limit from revenue alone (fallback when PAT unavailable).
+
+    Revenue tiers (INR):
+      < ₹10 Cr     → 20% of rev,  hard cap ₹2 Cr
+      ₹10–100 Cr   → 20% of rev,  hard cap ₹20 Cr
+      ₹100–500 Cr  → 15% of rev,  hard cap ₹75 Cr
+      ₹500–1000 Cr → 12% of rev,  hard cap ₹120 Cr
+      > ₹1000 Cr   → 10% of rev,  hard cap ₹500 Cr (platform cap)
+    """
+    if revenue <= 0:
+        return 1_000_000.0    # ₹10L absolute floor
+    if revenue < 10 * _CR:
+        return min(revenue * 0.20, 2 * _CR)
+    elif revenue < 100 * _CR:
+        return min(revenue * 0.20, 20 * _CR)
+    elif revenue < 500 * _CR:
+        return min(revenue * 0.15, 75 * _CR)
+    elif revenue < 1_000 * _CR:
+        return min(revenue * 0.12, 120 * _CR)
+    else:
+        return min(revenue * 0.10, _PLATFORM_CAP)
+
+
 def _recommended_limit_and_roi(
     overall_score: float,
     revenue: float | None,
     debt: float | None,
+    loan_requested: float | None = None,
+    pat: float | None = None,
 ) -> tuple[float, float]:
-    """Compute recommended_limit (INR) and recommended_roi (%).
-
-    FIX #14: Cap raised to ₹10Cr (100_000_000) — the old ₹1Cr cap was far too conservative
-    for enterprise B2B lending.
-
-    FIX #15: Debt-based cap removed. Low existing debt is a sign of financial health,
-    NOT a reason to reduce the recommended limit. Replaced with a debt-floor: if
-    total existing debt is very high, cap limit at 30% of debt to avoid over-exposure.
     """
-    # Base limit: 25% of revenue, capped at ₹10Cr
-    base_limit = 1_000_000.0   # ₹10L floor
-    if revenue and revenue > 0:
-        base_limit = min(revenue * 0.25, 100_000_000.0)  # FIX #14: was 10_000_000
+    Three-mode limit engine — picks the right approach based on available data.
 
-    # FIX #15: Only apply debt cap for HIGH-debt borrowers (debt/revenue > 2x)
-    if debt and debt > 0 and revenue and revenue > 0:
+    ── MODE 1: Loan anchor (loan_requested provided — always preferred) ───────
+      Recommended = loan_requested × score_factor
+      Most meaningful output: analyst knows exactly what was asked and gets a
+      scored counter-offer. Score 100 → full ask approved. Score 50 → 60% of ask.
+
+    ── MODE 2: Capacity-based (PAT available, no loan ask) ───────────────────
+      base = max(revenue_tier, PAT × 0.5)
+      Takes the HIGHER of revenue-based and PAT-based so:
+        • Growth/thin-margin companies: revenue-based wins → not penalised
+        • Profitable companies (e.g. Infosys PAT ₹26k Cr): PAT-based wins → rewarded
+      PAT × 0.5 = half annual profit — easily serviceable.
+      Hard ceiling: min(PAT × 0.5, revenue × 10%, PLATFORM_CAP).
+
+    ── MODE 3: Revenue fallback (no PAT, no loan ask) ────────────────────────
+      Revenue tiers as before.
+
+    In all modes:
+      score_factor = 0.20 + 0.80 × (score/100)  → floor at 20%, ceiling at 100%
+      ROI          = 12% base + 0.08% per score-point below 100, capped 12–20%
+      High-leverage cap applies to non-financial companies (debt/rev 2–5×).
+    """
+    score_factor = 0.20 + 0.80 * max(0.0, min(1.0, overall_score / 100.0))
+
+    def calc_roi() -> float:
+        return round(max(12.0, min(20.0, 12.0 + (100.0 - overall_score) * 0.08)), 2)
+
+    def round_lakh(v: float) -> float:
+        return float(round(v / 1e5) * 1e5)
+
+    # ── MODE 1: Loan anchor ──────────────────────────────────────────────────
+    if loan_requested and loan_requested > 0:
+        limit_out = min(loan_requested * score_factor, _PLATFORM_CAP)
+        return round_lakh(limit_out), calc_roi()
+
+    # ── Revenue base (always computed — used by modes 2 and 3) ──────────────
+    rb = _revenue_tier_base(revenue or 0.0)
+
+    # ── MODE 2: PAT-based capacity ───────────────────────────────────────────
+    if pat and pat > 0:
+        pat_capacity = pat * 0.50                              # half annual profit
+        if revenue and revenue > 0:
+            pat_capacity = min(pat_capacity, revenue * 0.10)  # never > 10% of revenue
+        pat_capacity = min(pat_capacity, _PLATFORM_CAP)
+        # Take the HIGHER: profitable companies get rewarded; thin-margin don't lose out
+        base = max(rb, pat_capacity)
+    else:
+        base = rb
+
+    # ── High-leverage cap (non-financial companies, debt/rev 2–5×) ──────────
+    if revenue and revenue > 0 and debt and debt > 0:
         lev = debt / revenue
-        if lev > 2.0:
-            # Over-leveraged — cap at 30% of existing debt as a guardrail
-            base_limit = min(base_limit, debt * 0.30)
+        if 2.0 < lev <= 5.0:
+            base = min(base, debt * 0.25)
+        # lev > 5×: financial company (NBFC/bank) — no debt-based cap
 
-    factor = overall_score / 100.0
-    limit_out = base_limit * (0.5 + 0.5 * factor)
-
-    # ROI: 12% base + penalty for lower score, capped at 18%
-    roi = 12.0 + (100.0 - overall_score) * 0.05
-    roi = max(12.0, min(roi, 18.0))
-
-    return float(int(limit_out)), round(roi, 2)
+    base = min(base, _PLATFORM_CAP)
+    limit_out = base * score_factor
+    return round_lakh(limit_out), calc_roi()
 
 
 def _calculate_confidence(extracted_facts: dict, risk_flags: list[dict]) -> float:
@@ -485,6 +548,7 @@ def compute_score(
     risk_flags: list[dict[str, Any]],
     secondary_research: dict[str, Any] | None,
     officer_notes: str | None,
+    loan_requested: float | None = None,
 ) -> dict[str, Any]:
     """
     Transparent weighted scoring. Returns:
@@ -575,7 +639,8 @@ def compute_score(
 
     revenue = _get_numeric(extracted_facts, "revenue")
     debt = _get_numeric(extracted_facts, "total_debt")
-    rec_limit, rec_roi = _recommended_limit_and_roi(overall, revenue, debt)
+    pat  = _get_numeric(extracted_facts, "PAT")
+    rec_limit, rec_roi = _recommended_limit_and_roi(overall, revenue, debt, loan_requested, pat)
 
     all_reasons = (
         reject_reasons
